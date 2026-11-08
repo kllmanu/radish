@@ -77,6 +77,21 @@ let artist = system('radish artists')
 let artist = substitute(artist, '\n\+$', '', '')
 ```
 
+## Import singles
+
+`radish import` moves audio files into `~/Music/<artist>/`, using the first
+non-empty `artist` tag. It does not create album or single-title subfolders.
+Pass one or more files or directories; directories are scanned recursively.
+Set `RADISH_LIBRARY` or use `--library` to choose another destination. Existing
+destination files are never overwritten, and files without an artist tag are
+rejected before any move is started.
+
+```sh
+radish import song.opus another-song.flac
+radish import /path/to/incoming-folder
+radish import *.opus --library /music/library
+```
+
 By default, each input gets only the three most important tags in the same
 YAML buffer:
 

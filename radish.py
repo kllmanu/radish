@@ -3,6 +3,7 @@
 
 import argparse
 from dataclasses import dataclass
+import errno
 import fnmatch
 import os
 from pathlib import Path
@@ -200,6 +201,117 @@ def artist_names(roots):
                 if isinstance(value, str) and value.strip()
             )
     return sorted(artists, key=str.casefold)
+
+
+def import_sources(sources):
+    paths = set()
+    for source in sources:
+        path = Path(source).expanduser()
+        if not path.exists():
+            raise EditError(f"{path}: path does not exist")
+        if path.is_symlink():
+            raise EditError(f"{path}: symbolic links are not supported for import")
+        if path.is_file():
+            if path.suffix.lower() not in SUPPORTED_AUDIO_SUFFIXES:
+                raise EditError(f"{path}: not an MP3, M4A, FLAC, or Opus audio file")
+            paths.add(path.resolve())
+        elif path.is_dir():
+            paths.update(
+                child.resolve()
+                for child in path.rglob("*")
+                if not child.is_symlink()
+                and child.is_file()
+                and child.suffix.lower() in SUPPORTED_AUDIO_SUFFIXES
+            )
+        else:
+            raise EditError(f"{path}: not a regular file or directory")
+    if not paths:
+        raise EditError("No supported audio files found")
+    return sorted(paths)
+
+
+def artist_directory_name(artist):
+    name = "".join(
+        "_" if character in '<>:"/\\|?*' or ord(character) < 32 else character
+        for character in artist
+    ).strip().rstrip(".")
+    if name in ("", ".", ".."):
+        raise EditError(f"Invalid artist name for a folder: {artist!r}")
+    return name
+
+
+def import_plan(sources, library):
+    library = Path(library).expanduser().resolve()
+    if library.exists() and not library.is_dir():
+        raise EditError(f"{library}: library path is not a directory")
+
+    plan = []
+    destinations = set()
+    for source in import_sources(sources):
+        try:
+            audio = mutagen.File(source, easy=True)
+        except (OSError, ValueError, mutagen.MutagenError) as error:
+            raise EditError(f"{source}: could not read audio tags: {error}") from error
+        if audio is None:
+            raise EditError(f"{source}: could not identify audio format")
+        values = audio.tags.get("artist", []) if audio.tags is not None else []
+        artist = next(
+            (value.strip() for value in values if isinstance(value, str) and value.strip()),
+            None,
+        )
+        if artist is None:
+            raise EditError(f"{source}: missing artist tag; refusing to import")
+
+        destination = library / artist_directory_name(artist) / source.name
+        if source == destination.resolve():
+            continue
+        if destination in destinations:
+            raise EditError(f"{destination}: multiple inputs would use the same destination")
+        if destination.exists() or destination.is_symlink():
+            raise EditError(f"{destination}: destination already exists; refusing to overwrite")
+        destinations.add(destination)
+        plan.append((source, destination))
+    return plan
+
+
+def move_without_overwrite(source, destination):
+    try:
+        os.link(source, destination)
+    except OSError as error:
+        if error.errno == errno.EEXIST:
+            raise EditError(f"{destination}: destination already exists; refusing to overwrite") from error
+        fd, temporary_name = tempfile.mkstemp(
+            prefix=f".{destination.name}.radish-", dir=destination.parent,
+        )
+        os.close(fd)
+        temporary = Path(temporary_name)
+        try:
+            shutil.copy2(source, temporary)
+            os.link(temporary, destination)
+        except OSError as copy_error:
+            if copy_error.errno == errno.EEXIST:
+                raise EditError(
+                    f"{destination}: destination already exists; refusing to overwrite"
+                ) from copy_error
+            raise
+        finally:
+            temporary.unlink(missing_ok=True)
+    try:
+        source.unlink()
+    except OSError:
+        destination.unlink(missing_ok=True)
+        raise
+
+
+def import_music(sources, library):
+    plan = import_plan(sources, library)
+    for _, destination in plan:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+    moved = []
+    for source, destination in plan:
+        move_without_overwrite(source, destination)
+        moved.append(destination)
+    return moved
 
 
 def render(files, all_fields=False):
@@ -422,6 +534,21 @@ def artists(paths, library_path):
             raise click.ClickException(f"fzf exited with status {result.returncode}")
     except click.ClickException:
         raise
+    except (EditError, OSError, ValueError, mutagen.MutagenError) as error:
+        raise click.ClickException(str(error)) from error
+
+
+@cli.command("import")
+@click.argument("paths", nargs=-1, required=True, type=click.Path(path_type=Path))
+@click.option(
+    "--library", "library_path", envvar="RADISH_LIBRARY", default="~/Music",
+    show_default=True, help="music library directory (default: ~/Music or $RADISH_LIBRARY)",
+)
+def import_command(paths, library_path):
+    """Move singles into ~/Music/<artist>/ without album subfolders."""
+    try:
+        for destination in import_music(paths, library_path):
+            click.echo(destination)
     except (EditError, OSError, ValueError, mutagen.MutagenError) as error:
         raise click.ClickException(str(error)) from error
 
