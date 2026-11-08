@@ -401,10 +401,27 @@ def cli():
     show_default=True, help="library directory (default: ~/Music or $RADISH_LIBRARY)",
 )
 def artists(paths, library_path):
-    """List unique track artists, one per line, for tools such as fzf."""
+    """Choose a track artist from the library using fzf."""
     try:
-        for artist in artist_names(paths or [library_path]):
-            click.echo(artist)
+        names = artist_names(paths or [library_path])
+        if not names:
+            raise click.ClickException("No artists found")
+        fzf = shutil.which("fzf")
+        if not fzf:
+            raise click.ClickException("fzf is required for 'radish artists' but was not found")
+        result = subprocess.run(
+            [fzf, "--reverse"],
+            input="\n".join(names) + "\n",
+            text=True,
+            stdout=subprocess.PIPE,
+            check=False,
+        )
+        if result.returncode == 0:
+            click.echo(result.stdout, nl=False)
+        elif result.returncode not in (1, 130):
+            raise click.ClickException(f"fzf exited with status {result.returncode}")
+    except click.ClickException:
+        raise
     except (EditError, OSError, ValueError, mutagen.MutagenError) as error:
         raise click.ClickException(str(error)) from error
 

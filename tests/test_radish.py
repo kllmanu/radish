@@ -444,28 +444,59 @@ class IntegrationTests(unittest.TestCase):
         moved = nested / self.paths[0].name
         shutil.move(self.paths[0], moved)
 
-        result = CliRunner().invoke(tag_edit.cli, ["artists", str(self.directory)])
+        with patch.object(tag_edit.subprocess, "run", return_value=subprocess.CompletedProcess(
+            ["fzf"], 0, stdout="Beta Artist\n",
+        )) as run_fzf:
+            result = CliRunner().invoke(tag_edit.cli, ["artists", str(self.directory)])
         self.assertEqual(result.exit_code, 0, result.output)
-        self.assertEqual(result.output.splitlines(), ["Alpha Artist", "Beta Artist"])
-
-        result = CliRunner().invoke(
-            tag_edit.cli, ["artists", str(moved), str(self.paths[1])],
+        self.assertEqual(result.output, "Beta Artist\n")
+        self.assertEqual(
+            run_fzf.call_args.kwargs["input"],
+            "Alpha Artist\nBeta Artist\n",
         )
+        self.assertEqual(run_fzf.call_args.args[0][-1], "--reverse")
+
+        with patch.object(tag_edit.subprocess, "run", return_value=subprocess.CompletedProcess(
+            ["fzf"], 0, stdout="Alpha Artist\n",
+        )):
+            result = CliRunner().invoke(
+                tag_edit.cli, ["artists", str(moved), str(self.paths[1])],
+            )
         self.assertEqual(result.exit_code, 0, result.output)
-        self.assertEqual(result.output.splitlines(), ["Alpha Artist", "Beta Artist"])
+        self.assertEqual(result.output, "Alpha Artist\n")
 
     def test_artists_uses_configured_library_and_reports_invalid_paths(self):
-        result = CliRunner().invoke(
-            tag_edit.cli, ["artists"], env={"RADISH_LIBRARY": str(self.directory)},
-        )
+        with patch.object(tag_edit.subprocess, "run", return_value=subprocess.CompletedProcess(
+            ["fzf"], 0, stdout="Original Artist\n",
+        )):
+            result = CliRunner().invoke(
+                tag_edit.cli, ["artists"], env={"RADISH_LIBRARY": str(self.directory)},
+            )
         self.assertEqual(result.exit_code, 0, result.output)
-        self.assertEqual(result.output.splitlines(), ["Original Artist"])
+        self.assertEqual(result.output, "Original Artist\n")
 
         result = CliRunner().invoke(
             tag_edit.cli, ["artists", str(self.directory / "missing")],
         )
         self.assertNotEqual(result.exit_code, 0)
         self.assertIn("path does not exist", result.output)
+
+    def test_artists_handles_cancel_and_missing_fzf(self):
+        with patch.object(tag_edit.subprocess, "run", return_value=subprocess.CompletedProcess(
+            ["fzf"], 130, stdout="",
+        )):
+            result = CliRunner().invoke(
+                tag_edit.cli, ["artists", str(self.directory)],
+            )
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertEqual(result.output, "")
+
+        with patch.object(tag_edit.shutil, "which", return_value=None):
+            result = CliRunner().invoke(
+                tag_edit.cli, ["artists", str(self.directory)],
+            )
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertIn("fzf is required", result.output)
 
     def test_real_editor_process(self):
         editor = self.directory / "fake editor.py"

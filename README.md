@@ -58,23 +58,22 @@ Use `--` before filenames starting with a dash.
 
 ## Choose an artist
 
-`radish artists` prints unique track artists, one per line, for use with
-interactive selectors such as `fzf`. By default it scans `~/Music` recursively.
-Set `RADISH_LIBRARY` or use `--library` to choose another default directory.
-Paths passed after the command override that default and can be files or
-directories:
+`radish artists` opens `fzf` with unique track artists from the library and
+prints the selection. It scans `~/Music` recursively by default; `fzf` must be
+installed. Set `RADISH_LIBRARY` or use `--library` to choose another default
+directory. Paths passed after the command override that default and can be
+files or directories:
 
 ```sh
-radish artists | fzf --reverse
-RADISH_LIBRARY=/music/library radish artists | fzf --reverse
-radish artists /music/other-library | fzf --reverse
+radish artists
+RADISH_LIBRARY=/music/library radish artists
+radish artists /music/other-library
 ```
 
-In Vim, call the command through `system()` and use the selected artist as the
-replacement value:
+In Vim, call Radish directly and use its output as the selected artist:
 
 ```vim
-let artist = system('radish artists | fzf --reverse')
+let artist = system('radish artists')
 let artist = substitute(artist, '\n\+$', '', '')
 ```
 
