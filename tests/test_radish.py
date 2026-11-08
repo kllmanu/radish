@@ -434,6 +434,39 @@ class IntegrationTests(unittest.TestCase):
             ]), 0)
         self.assertTrue(all(audio.values["title"] == ["CLI title"] for audio in self.files()))
 
+    def test_artists_lists_unique_values_and_accepts_path_overrides(self):
+        for path, artist in zip(self.paths, ("Beta Artist", "Alpha Artist", "Beta Artist", "  ")):
+            audio = mutagen.File(path, easy=True)
+            audio["artist"] = [artist]
+            audio.save()
+        nested = self.directory / "nested"
+        nested.mkdir()
+        moved = nested / self.paths[0].name
+        shutil.move(self.paths[0], moved)
+
+        result = CliRunner().invoke(tag_edit.cli, ["artists", str(self.directory)])
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertEqual(result.output.splitlines(), ["Alpha Artist", "Beta Artist"])
+
+        result = CliRunner().invoke(
+            tag_edit.cli, ["artists", str(moved), str(self.paths[1])],
+        )
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertEqual(result.output.splitlines(), ["Alpha Artist", "Beta Artist"])
+
+    def test_artists_uses_configured_library_and_reports_invalid_paths(self):
+        result = CliRunner().invoke(
+            tag_edit.cli, ["artists"], env={"RADISH_LIBRARY": str(self.directory)},
+        )
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertEqual(result.output.splitlines(), ["Original Artist"])
+
+        result = CliRunner().invoke(
+            tag_edit.cli, ["artists", str(self.directory / "missing")],
+        )
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertIn("path does not exist", result.output)
+
     def test_real_editor_process(self):
         editor = self.directory / "fake editor.py"
         editor.write_text(

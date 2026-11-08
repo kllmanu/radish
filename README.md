@@ -56,6 +56,28 @@ Use a foreground/wait flag for GUI editors, e.g. `--editor 'code --wait'`.
 Commands are parsed as arguments, not run through a shell.
 Use `--` before filenames starting with a dash.
 
+## Choose an artist
+
+`radish artists` prints unique track artists, one per line, for use with
+interactive selectors such as `fzf`. By default it scans `~/Music` recursively.
+Set `RADISH_LIBRARY` or use `--library` to choose another default directory.
+Paths passed after the command override that default and can be files or
+directories:
+
+```sh
+radish artists | fzf --reverse
+RADISH_LIBRARY=/music/library radish artists | fzf --reverse
+radish artists /music/other-library | fzf --reverse
+```
+
+In Vim, call the command through `system()` and use the selected artist as the
+replacement value:
+
+```vim
+let artist = system('radish artists | fzf --reverse')
+let artist = substitute(artist, '\n\+$', '', '')
+```
+
 By default, each input gets only the three most important tags in the same
 YAML buffer:
 

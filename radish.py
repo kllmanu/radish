@@ -96,6 +96,7 @@ COMMON = ("album", "artist", "albumartist", "title", "track", "disc",
 ALIASES = {"track": "tracknumber", "disc": "discnumber"}
 REVERSE_ALIASES = {value: key for key, value in ALIASES.items()}
 HIDDEN_FIELDS = {"file", "metadata_block_picture", "coverart", "coverartmime"}
+SUPPORTED_AUDIO_SUFFIXES = {".mp3", ".m4a", ".flac", ".opus"}
 HEADER = (
     "# Edit values, save, and quit to apply. Quit without saving to cancel.\n"
     "# Documents match input files in order. Blank/null/[] deletes a tag; omitted fields stay unchanged.\n"
@@ -163,6 +164,42 @@ def read_files(filenames):
             raise EditError(f"{path}: file changed while reading")
         result.append(audio)
     return result
+
+
+def artist_names(roots):
+    paths = set()
+    for root in roots:
+        path = Path(root).expanduser()
+        if not path.exists():
+            raise EditError(f"{path}: path does not exist")
+        if path.is_file():
+            if path.suffix.lower() not in SUPPORTED_AUDIO_SUFFIXES:
+                raise EditError(f"{path}: not an MP3, M4A, FLAC, or Opus audio file")
+            paths.add(path.resolve())
+        elif path.is_dir():
+            paths.update(
+                child.resolve()
+                for child in path.rglob("*")
+                if child.is_file() and child.suffix.lower() in SUPPORTED_AUDIO_SUFFIXES
+            )
+        else:
+            raise EditError(f"{path}: not a regular file or directory")
+
+    artists = set()
+    for path in sorted(paths):
+        try:
+            audio = mutagen.File(path, easy=True)
+        except (OSError, ValueError, mutagen.MutagenError) as error:
+            raise EditError(f"{path}: could not read audio tags: {error}") from error
+        if audio is None:
+            raise EditError(f"{path}: could not identify audio format")
+        if audio.tags is not None:
+            artists.update(
+                value.strip()
+                for value in audio.tags.get("artist", [])
+                if isinstance(value, str) and value.strip()
+            )
+    return sorted(artists, key=str.casefold)
 
 
 def render(files, all_fields=False):
@@ -355,6 +392,21 @@ def execute(args):
 @click.group()
 def cli():
     """Edit audio metadata in your text editor, without beets."""
+
+
+@cli.command()
+@click.argument("paths", nargs=-1, type=click.Path(path_type=Path))
+@click.option(
+    "--library", "library_path", envvar="RADISH_LIBRARY", default="~/Music",
+    show_default=True, help="library directory (default: ~/Music or $RADISH_LIBRARY)",
+)
+def artists(paths, library_path):
+    """List unique track artists, one per line, for tools such as fzf."""
+    try:
+        for artist in artist_names(paths or [library_path]):
+            click.echo(artist)
+    except (EditError, OSError, ValueError, mutagen.MutagenError) as error:
+        raise click.ClickException(str(error)) from error
 
 
 @cli.command()
