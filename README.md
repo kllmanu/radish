@@ -83,8 +83,10 @@ let artist = substitute(artist, '\n\+$', '', '')
 non-empty `artist` tag. It does not create album or single-title subfolders.
 Pass one or more files or directories; directories are scanned recursively.
 Set `RADISH_LIBRARY` or use `--library` to choose another destination. Existing
-destination files are never overwritten, and files without an artist tag are
-rejected before any move is started.
+destination files are never overwritten: colliding names get `_1`, `_2`, etc.
+before the extension. Files without an artist tag are rejected before any move
+is started. Imported files are removed from their source; source directories
+are removed only when empty, so unrelated files are kept.
 
 ```sh
 radish import song.opus another-song.flac

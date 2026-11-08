@@ -502,12 +502,14 @@ class IntegrationTests(unittest.TestCase):
         source = self.directory / "incoming"
         nested = source / "nested"
         nested.mkdir(parents=True)
-        paths = self.paths[:2]
-        for path, artist in zip(paths, ("Folder Artist", "Folder Artist")):
-            audio = mutagen.File(path, easy=True)
-            audio["artist"] = [artist]
+        paths = []
+        for source_path, name in zip(self.paths[:2], ("single-one", "single-two")):
+            audio = mutagen.File(source_path, easy=True)
+            audio["artist"] = ["Folder Artist"]
             audio.save()
-            shutil.move(path, nested / path.name)
+            destination = nested / f"{name}{source_path.suffix}"
+            shutil.move(source_path, destination)
+            paths.append(destination)
         (source / "notes.txt").write_text("ignored", encoding="utf-8")
         library = self.directory / "Music"
 
@@ -524,13 +526,36 @@ class IntegrationTests(unittest.TestCase):
         self.assertTrue(all(path.is_file() for path in destinations))
         self.assertFalse(any(path.exists() for path in paths))
         self.assertIn(str(library / "Folder Artist"), result.output)
+        self.assertFalse(nested.exists())
+        self.assertTrue((source / "notes.txt").exists())
+
+    def test_import_removes_source_folder_when_all_contents_are_imported(self):
+        source = self.directory / "incoming"
+        source.mkdir()
+        audio_path = source / "single.opus"
+        shutil.copy2(self.paths[0], audio_path)
+        audio = mutagen.File(audio_path, easy=True)
+        audio["artist"] = ["Folder Artist"]
+        audio.save()
+        library = self.directory / "Music"
+
+        result = CliRunner().invoke(
+            tag_edit.cli, ["import", str(source), "--library", str(library)],
+        )
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertFalse(source.exists())
+        self.assertTrue((library / "Folder Artist" / "single.opus").is_file())
 
     def test_import_accepts_multiple_files_and_uses_first_artist(self):
-        source_paths = self.paths[:2]
-        for path in source_paths:
+        source_paths = []
+        for path in self.paths[:2]:
             audio = mutagen.File(path, easy=True)
             audio["artist"] = ["First Artist", "Second Artist"]
             audio.save()
+            renamed = path.with_name(f"same-title{path.suffix}")
+            path.rename(renamed)
+            source_paths.append(renamed)
         library = self.directory / "Music"
 
         result = CliRunner().invoke(
@@ -541,12 +566,17 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(result.exit_code, 0, result.output)
         self.assertEqual(
             {path.name for path in (library / "First Artist").iterdir()},
-            {path.name for path in source_paths},
+            {"same-title.flac", "same-title_1.opus"},
         )
+        self.assertFalse(any(path.exists() for path in source_paths))
         self.assertFalse((library / "Second Artist").exists())
 
     def test_import_rejects_missing_artist_without_moving_any_files(self):
-        source_paths = self.paths[:2]
+        source_paths = []
+        for path, name in zip(self.paths[:2], ("missing-artist", "present-artist")):
+            renamed = path.with_name(f"{name}{path.suffix}")
+            path.rename(renamed)
+            source_paths.append(renamed)
         audio = mutagen.File(source_paths[0], easy=True)
         del audio["artist"]
         audio.save()
@@ -562,7 +592,7 @@ class IntegrationTests(unittest.TestCase):
         self.assertTrue(all(path.exists() for path in source_paths))
         self.assertFalse(library.exists())
 
-    def test_import_never_overwrites_existing_destination(self):
+    def test_import_uses_unique_name_when_destination_exists(self):
         source = self.paths[0]
         audio = mutagen.File(source, easy=True)
         audio["artist"] = ["Existing Artist"]
@@ -572,14 +602,37 @@ class IntegrationTests(unittest.TestCase):
         destination.parent.mkdir(parents=True)
         destination.write_bytes(b"keep existing")
 
+        existing_contents = destination.read_bytes()
         result = CliRunner().invoke(
             tag_edit.cli, ["import", str(source), "--library", str(library)],
         )
 
-        self.assertNotEqual(result.exit_code, 0)
-        self.assertIn("refusing to overwrite", result.output)
-        self.assertTrue(source.exists())
-        self.assertEqual(destination.read_bytes(), b"keep existing")
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertFalse(source.exists())
+        self.assertEqual(destination.read_bytes(), existing_contents)
+        self.assertTrue((destination.parent / f"{source.stem}_1{source.suffix}").exists())
+
+    def test_import_uses_unique_name_for_same_title_with_different_extension(self):
+        source = self.paths[0]
+        audio = mutagen.File(source, easy=True)
+        audio["artist"] = ["Existing Artist"]
+        audio.save()
+        library = self.directory / "Music"
+        destination = library / "Existing Artist" / f"{source.stem}.flac"
+        destination.parent.mkdir(parents=True)
+        destination.write_bytes(b"keep existing")
+
+        existing_contents = destination.read_bytes()
+        result = CliRunner().invoke(
+            tag_edit.cli, ["import", str(source), "--library", str(library)],
+        )
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertFalse(source.exists())
+        self.assertEqual(destination.read_bytes(), existing_contents)
+        self.assertTrue(
+            (destination.parent / f"{source.stem}_1{source.suffix}").exists()
+        )
 
     def test_real_editor_process(self):
         editor = self.directory / "fake editor.py"

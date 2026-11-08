@@ -240,13 +240,35 @@ def artist_directory_name(artist):
     return name
 
 
+def choose_import_destination(source, artist, library, reserved):
+    artist_directory = library / artist_directory_name(artist)
+    for suffix in range(0, 1_000_000):
+        name = source.name if suffix == 0 else f"{source.stem}_{suffix}{source.suffix}"
+        destination = artist_directory / name
+        if source == destination.resolve():
+            return destination
+        key = (str(destination.parent).casefold(), destination.stem.casefold())
+        if key in reserved:
+            continue
+        if destination.parent.is_dir() and any(
+            child.stem.casefold() == destination.stem.casefold()
+            for child in destination.parent.iterdir()
+        ):
+            continue
+        if destination.exists() or destination.is_symlink():
+            continue
+        reserved.add(key)
+        return destination
+    raise EditError(f"{artist_directory}: could not generate a unique filename")
+
+
 def import_plan(sources, library):
     library = Path(library).expanduser().resolve()
     if library.exists() and not library.is_dir():
         raise EditError(f"{library}: library path is not a directory")
 
     plan = []
-    destinations = set()
+    reserved = set()
     for source in import_sources(sources):
         try:
             audio = mutagen.File(source, easy=True)
@@ -265,12 +287,9 @@ def import_plan(sources, library):
         destination = library / artist_directory_name(artist) / source.name
         if source == destination.resolve():
             continue
-        if destination in destinations:
-            raise EditError(f"{destination}: multiple inputs would use the same destination")
-        if destination.exists() or destination.is_symlink():
-            raise EditError(f"{destination}: destination already exists; refusing to overwrite")
-        destinations.add(destination)
-        plan.append((source, destination))
+        destination = choose_import_destination(source, artist, library, reserved)
+        if source != destination.resolve():
+            plan.append((source, destination, artist))
     return plan
 
 
@@ -279,7 +298,7 @@ def move_without_overwrite(source, destination):
         os.link(source, destination)
     except OSError as error:
         if error.errno == errno.EEXIST:
-            raise EditError(f"{destination}: destination already exists; refusing to overwrite") from error
+            raise FileExistsError(error.errno, error.strerror, destination) from error
         fd, temporary_name = tempfile.mkstemp(
             prefix=f".{destination.name}.radish-", dir=destination.parent,
         )
@@ -290,8 +309,8 @@ def move_without_overwrite(source, destination):
             os.link(temporary, destination)
         except OSError as copy_error:
             if copy_error.errno == errno.EEXIST:
-                raise EditError(
-                    f"{destination}: destination already exists; refusing to overwrite"
+                raise FileExistsError(
+                    copy_error.errno, copy_error.strerror, destination,
                 ) from copy_error
             raise
         finally:
@@ -303,14 +322,54 @@ def move_without_overwrite(source, destination):
         raise
 
 
+def cleanup_import_directories(sources, library):
+    library = Path(library).expanduser().resolve()
+    roots = set()
+    for source in sources:
+        path = Path(source).expanduser()
+        if path.is_dir() and not path.is_symlink():
+            root = path.resolve()
+            if root != library and not root.is_relative_to(library):
+                roots.add(root)
+
+    for root in sorted(roots, key=lambda path: len(path.parts), reverse=True):
+        directories = [
+            path for path in root.rglob("*")
+            if path.is_dir() and not path.is_symlink()
+        ]
+        for directory in sorted(directories, key=lambda path: len(path.parts), reverse=True):
+            try:
+                directory.rmdir()
+            except OSError as error:
+                if error.errno not in (errno.ENOTEMPTY, errno.EEXIST):
+                    raise
+        try:
+            root.rmdir()
+        except OSError as error:
+            if error.errno not in (errno.ENOTEMPTY, errno.EEXIST):
+                raise
+
+
 def import_music(sources, library):
+    sources = tuple(sources)
     plan = import_plan(sources, library)
-    for _, destination in plan:
+    for _, destination, _ in plan:
         destination.parent.mkdir(parents=True, exist_ok=True)
     moved = []
-    for source, destination in plan:
-        move_without_overwrite(source, destination)
+    reserved = {
+        (str(destination.parent).casefold(), destination.stem.casefold())
+        for _, destination, _ in plan
+    }
+    for source, destination, artist in plan:
+        while True:
+            try:
+                move_without_overwrite(source, destination)
+                break
+            except FileExistsError:
+                destination = choose_import_destination(source, artist, library, reserved)
+                destination.parent.mkdir(parents=True, exist_ok=True)
         moved.append(destination)
+    cleanup_import_directories(sources, library)
     return moved
 
 
