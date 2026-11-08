@@ -129,7 +129,9 @@ When an edited file is inside the configured music library (`~/Music`,
 to `Artist/Title.ext`. Changing the album tag moves it to
 `Artist/Album/Title.ext` (or back to `Artist/Title.ext` if the album is cleared).
 Files outside the library stay in place. Name collisions get `_1`, `_2`, etc.;
-existing files are never overwritten.
+existing files are never overwritten. After a successful edit that changes
+tags, Radish runs `cmus-continue` from `PATH` to refresh playback; no-op edits,
+`--print`, and `--dry-run` do not run it.
 
 - Set a field to blank, `null`, `''`, or `[]` to delete its tag.
 - Removing a field's entire line **preserves** the existing tag.

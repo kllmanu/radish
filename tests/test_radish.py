@@ -55,6 +55,25 @@ class ParsingTests(unittest.TestCase):
     def parse(self, fields):
         return tag_edit.parse_changes(fields, [self.audio])
 
+    def test_cmus_continue_runs_from_path_and_reports_failure(self):
+        with patch.object(tag_edit.shutil, "which", return_value="/home/user/bin/cmus-continue"), \
+                patch.object(tag_edit.subprocess, "run", return_value=subprocess.CompletedProcess(
+                    ["cmus-continue"], 0,
+                )) as run:
+            tag_edit.continue_cmus()
+        run.assert_called_once_with(["/home/user/bin/cmus-continue"], check=False)
+
+        with patch.object(tag_edit.shutil, "which", return_value=None):
+            with self.assertRaisesRegex(tag_edit.EditError, "not found on PATH"):
+                tag_edit.continue_cmus()
+
+        with patch.object(tag_edit.shutil, "which", return_value="/tmp/cmus-continue"), \
+                patch.object(tag_edit.subprocess, "run", return_value=subprocess.CompletedProcess(
+                    ["cmus-continue"], 7,
+                )):
+            with self.assertRaisesRegex(tag_edit.EditError, "exited with status 7"):
+                tag_edit.continue_cmus()
+
     def test_default_fields_include_missing_values(self):
         document, = yaml.safe_load_all(tag_edit.render([self.audio]))
         self.assertEqual(list(document), ["title", "artist", "album"])
@@ -154,6 +173,8 @@ class IntegrationTests(unittest.TestCase):
     def setUp(self):
         self.workspace = tempfile.TemporaryDirectory(prefix="radish-test-")
         self.directory = Path(self.workspace.name)
+        self.cmus_continue_patch = patch.object(tag_edit, "continue_cmus")
+        self.cmus_continue_patch.start()
         self.paths = []
         picture = Picture()
         picture.type = 3
@@ -191,6 +212,7 @@ class IntegrationTests(unittest.TestCase):
             self.paths.append(path)
 
     def tearDown(self):
+        self.cmus_continue_patch.stop()
         self.workspace.cleanup()
 
     def files(self):
@@ -261,13 +283,15 @@ class IntegrationTests(unittest.TestCase):
         edited_yaml = self.directory / "edit.yaml"
         edited_yaml.write_text(yaml.safe_dump_all([document]), encoding="utf-8")
 
-        result = CliRunner().invoke(
-            tag_edit.cli,
-            ["edit", "--apply", str(edited_yaml), "--library", str(library), str(source)],
-        )
+        with patch.object(tag_edit, "continue_cmus") as continue_cmus:
+            result = CliRunner().invoke(
+                tag_edit.cli,
+                ["edit", "--apply", str(edited_yaml), "--library", str(library), str(source)],
+            )
 
         destination = library / "New Artist" / "New Title.m4a"
         self.assertEqual(result.exit_code, 0, result.output)
+        continue_cmus.assert_called_once_with()
         self.assertTrue(destination.is_file())
         self.assertFalse(source.exists())
         self.assertFalse(source.parent.exists())
@@ -359,18 +383,34 @@ class IntegrationTests(unittest.TestCase):
         edited_yaml = self.directory / "dry-run.yaml"
         edited_yaml.write_text(yaml.safe_dump_all([document]), encoding="utf-8")
 
-        result = CliRunner().invoke(
-            tag_edit.cli,
-            [
-                "edit", "--dry-run", "--apply", str(edited_yaml),
-                "--library", str(library), str(source),
-            ],
-        )
+        with patch.object(tag_edit, "continue_cmus") as continue_cmus:
+            result = CliRunner().invoke(
+                tag_edit.cli,
+                [
+                    "edit", "--dry-run", "--apply", str(edited_yaml),
+                    "--library", str(library), str(source),
+                ],
+            )
 
         self.assertEqual(result.exit_code, 0, result.output)
+        continue_cmus.assert_not_called()
         self.assertIn(f"move to: {source.parent / 'New Title.opus'}", result.output)
         self.assertTrue(source.is_file())
         self.assertFalse((source.parent / "New Title.opus").exists())
+
+    def test_edit_noop_does_not_call_cmus_continue(self):
+        source = self.paths[0]
+        document, = yaml.safe_load_all(tag_edit.render(tag_edit.read_files([str(source)])))
+        edited_yaml = self.directory / "unchanged.yaml"
+        edited_yaml.write_text(yaml.safe_dump_all([document]), encoding="utf-8")
+
+        with patch.object(tag_edit, "continue_cmus") as continue_cmus:
+            result = CliRunner().invoke(
+                tag_edit.cli, ["edit", "--apply", str(edited_yaml), str(source)],
+            )
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        continue_cmus.assert_not_called()
 
     def test_all_formats_edit_delete_preserve_art_and_audio(self):
         files = self.files()

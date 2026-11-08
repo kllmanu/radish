@@ -634,6 +634,15 @@ def editor_command(override):
     return command
 
 
+def continue_cmus():
+    command = shutil.which("cmus-continue")
+    if not command:
+        raise EditError("cmus-continue was not found on PATH")
+    result = subprocess.run([command], check=False)
+    if result.returncode:
+        raise EditError(f"cmus-continue exited with status {result.returncode}")
+
+
 def run(args):
     files = read_files(args.files)
     original = render(files, all_fields=args.all_fields)
@@ -667,6 +676,8 @@ def run(args):
             relocations = apply_changes(changes, args.library_path)
             for source, destination in relocations:
                 print(f"Moved {source} -> {destination}")
+            if changes:
+                continue_cmus()
         print(f"{'Would update' if args.dry_run else 'Updated'} {len(changes)} file(s).")
     except (EditError, OSError, ValueError, yaml.YAMLError, mutagen.MutagenError,
             KeyboardInterrupt):
