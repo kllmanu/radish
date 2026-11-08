@@ -515,6 +515,7 @@ class IntegrationTests(unittest.TestCase):
 
         result = CliRunner().invoke(
             tag_edit.cli, ["import", str(source), "--library", str(library)],
+            input="n\n",
         )
 
         self.assertEqual(result.exit_code, 0, result.output)
@@ -541,6 +542,7 @@ class IntegrationTests(unittest.TestCase):
 
         result = CliRunner().invoke(
             tag_edit.cli, ["import", str(source), "--library", str(library)],
+            input="n\n",
         )
 
         self.assertEqual(result.exit_code, 0, result.output)
@@ -561,6 +563,7 @@ class IntegrationTests(unittest.TestCase):
         result = CliRunner().invoke(
             tag_edit.cli,
             ["import", *(str(path) for path in source_paths), "--library", str(library)],
+            input="n\n",
         )
 
         self.assertEqual(result.exit_code, 0, result.output)
@@ -605,6 +608,7 @@ class IntegrationTests(unittest.TestCase):
         existing_contents = destination.read_bytes()
         result = CliRunner().invoke(
             tag_edit.cli, ["import", str(source), "--library", str(library)],
+            input="n\n",
         )
 
         self.assertEqual(result.exit_code, 0, result.output)
@@ -625,6 +629,7 @@ class IntegrationTests(unittest.TestCase):
         existing_contents = destination.read_bytes()
         result = CliRunner().invoke(
             tag_edit.cli, ["import", str(source), "--library", str(library)],
+            input="n\n",
         )
 
         self.assertEqual(result.exit_code, 0, result.output)
@@ -633,6 +638,50 @@ class IntegrationTests(unittest.TestCase):
         self.assertTrue(
             (destination.parent / f"{source.stem}_1{source.suffix}").exists()
         )
+
+    def test_import_offers_default_and_custom_cmus_playlist_names(self):
+        playlist_dir = self.directory / "playlists"
+        with patch.object(tag_edit, "CMUS_PLAYLIST_DIR", playlist_dir):
+            source = self.directory / "Summer Singles"
+            source.mkdir()
+            audio_path = source / "summer.opus"
+            shutil.copy2(self.paths[0], audio_path)
+            audio = mutagen.File(audio_path, easy=True)
+            audio["artist"] = ["Playlist Artist"]
+            audio.save()
+            library = self.directory / "Music"
+
+            result = CliRunner().invoke(
+                tag_edit.cli, ["import", str(source), "--library", str(library)],
+                input="y\n\n",
+            )
+
+            self.assertEqual(result.exit_code, 0, result.output)
+            default_playlist = playlist_dir / "Summer Singles.m3u"
+            self.assertTrue(default_playlist.exists(), result.output)
+            imported = library / "Playlist Artist" / "summer.opus"
+            self.assertEqual(
+                default_playlist.read_text(encoding="utf-8"),
+                f"#EXTM3U\n{imported.resolve()}\n",
+            )
+            self.assertIn("Playlist name [Summer Singles]", result.output)
+
+            second = self.directory / "second"
+            second.mkdir()
+            second_audio = second / "second.opus"
+            shutil.copy2(self.paths[1], second_audio)
+            audio = mutagen.File(second_audio, easy=True)
+            audio["artist"] = ["Playlist Artist"]
+            audio.save()
+            result = CliRunner().invoke(
+                tag_edit.cli, ["import", str(second_audio), "--library", str(library)],
+                input="y\nMy Custom Mix\n",
+            )
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        custom_playlist = playlist_dir / "My Custom Mix.m3u"
+        self.assertTrue(custom_playlist.is_file())
+        self.assertIn("Playlist name [second]", result.output)
 
     def test_real_editor_process(self):
         editor = self.directory / "fake editor.py"

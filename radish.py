@@ -98,6 +98,7 @@ ALIASES = {"track": "tracknumber", "disc": "discnumber"}
 REVERSE_ALIASES = {value: key for key, value in ALIASES.items()}
 HIDDEN_FIELDS = {"file", "metadata_block_picture", "coverart", "coverartmime"}
 SUPPORTED_AUDIO_SUFFIXES = {".mp3", ".m4a", ".flac", ".opus"}
+CMUS_PLAYLIST_DIR = Path("~/.config/cmus/playlists")
 HEADER = (
     "# Edit values, save, and quit to apply. Quit without saving to cancel.\n"
     "# Documents match input files in order. Blank/null/[] deletes a tag; omitted fields stay unchanged.\n"
@@ -373,6 +374,41 @@ def import_music(sources, library):
     return moved
 
 
+def suggested_playlist_name(sources):
+    paths = [Path(source).expanduser() for source in sources]
+    if len(paths) == 1 and paths[0].is_dir():
+        return paths[0].name
+    parents = [path if path.is_dir() else path.parent for path in paths]
+    common = Path(os.path.commonpath([str(path.resolve()) for path in parents]))
+    return common.name or "Imported Singles"
+
+
+def write_cmus_playlist(destinations, name):
+    name = "".join(
+        "_" if character in '<>:"/\\|?*' or ord(character) < 32 else character
+        for character in name
+    ).strip().rstrip(".")
+    if name.lower().endswith(".m3u"):
+        name = name[:-4]
+    if name in ("", ".", ".."):
+        raise EditError("Playlist name must contain a usable filename")
+
+    playlist_dir = CMUS_PLAYLIST_DIR.expanduser()
+    playlist_dir.mkdir(parents=True, exist_ok=True)
+    for suffix in range(0, 1_000_000):
+        basename = name if suffix == 0 else f"{name}_{suffix}"
+        playlist = playlist_dir / f"{basename}.m3u"
+        try:
+            with playlist.open("x", encoding="utf-8", newline="\n") as stream:
+                stream.write("#EXTM3U\n")
+                for destination in destinations:
+                    stream.write(f"{destination.resolve()}\n")
+        except FileExistsError:
+            continue
+        return playlist
+    raise EditError(f"{playlist_dir}: could not generate a unique playlist name")
+
+
 def render(files, all_fields=False):
     documents = []
     for audio in files:
@@ -606,8 +642,16 @@ def artists(paths, library_path):
 def import_command(paths, library_path):
     """Move singles into ~/Music/<artist>/ without album subfolders."""
     try:
-        for destination in import_music(paths, library_path):
+        playlist_name = suggested_playlist_name(paths)
+        destinations = import_music(paths, library_path)
+        for destination in destinations:
             click.echo(destination)
+        if destinations and click.confirm("Create a cmus playlist?", default=False):
+            name = click.prompt(
+                "Playlist name", default=playlist_name,
+            )
+            playlist = write_cmus_playlist(destinations, name)
+            click.echo(f"Created playlist: {playlist}")
     except (EditError, OSError, ValueError, mutagen.MutagenError) as error:
         raise click.ClickException(str(error)) from error
 

@@ -86,7 +86,11 @@ Set `RADISH_LIBRARY` or use `--library` to choose another destination. Existing
 destination files are never overwritten: colliding names get `_1`, `_2`, etc.
 before the extension. Files without an artist tag are rejected before any move
 is started. Imported files are removed from their source; source directories
-are removed only when empty, so unrelated files are kept.
+are removed only when empty, so unrelated files are kept. After importing,
+Radish asks whether to create a cmus `.m3u` playlist in
+`~/.config/cmus/playlists/`. It suggests a name from the source folder; accept
+the default or enter a different name. Existing playlists are not overwritten;
+a numeric suffix is added when needed.
 
 ```sh
 radish import song.opus another-song.flac
