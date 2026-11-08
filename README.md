@@ -1,8 +1,8 @@
-# tag-edit
+# radish
 
 Edit MP3, M4A, Opus, and FLAC metadata in Vim or any other text editor.
 No beets, database, importing, transcoding, or Vim plugin required.
-Python 3.10+, Mutagen, and PyYAML are required.
+Python 3.10+, Click, Mutagen, and PyYAML are required.
 The standalone binary bundles Python and its dependencies.
 
 ## Standalone binary
@@ -10,37 +10,45 @@ The standalone binary bundles Python and its dependencies.
 Run the Linux x86-64 executable directly:
 
 ```sh
-./dist/tag-edit song.mp3 song.m4a song.opus song.flac
+./dist/radish edit song.mp3 song.m4a song.opus song.flac
 ```
 
 To rebuild on your target operating system and architecture:
 
 ```sh
-python3 -m venv .venv
-.venv/bin/python -m pip install '.[binary]'
-.venv/bin/python -m PyInstaller --clean --noconfirm --onefile \
-  --name tag-edit --specpath build --collect-submodules mutagen tag_edit.py
+make build
 ```
 
-The executable is written to `dist/tag-edit`. No Python installation is needed
+The executable is written to `dist/radish`. No Python installation is needed
 to run it, but a text editor and compatible system libraries are still required.
 Linux builds are not fully static; build on the oldest Linux distribution you
 intend to support. The one-file executable extracts its runtime into a temporary
 directory at startup.
 
+## Development
+
+```sh
+make install
+make test
+make build
+```
+
+`make build` installs the optional PyInstaller dependency before building.
+Set `PYTHON` to choose another Python executable, e.g. `make test PYTHON=.venv/bin/python`.
+
 ## Install and use
 
 ```sh
 python3 -m pip install --user .
-tag-edit song.mp3 album/*.flac
-EDITOR=nvim tag-edit song.m4a song.opus
-tag-edit --editor 'vim -f' song.mp3
+radish edit song.mp3 album/*.flac
+EDITOR=nvim radish edit song.m4a song.opus
+radish edit --editor 'vim -f' song.mp3
 ```
 
 Alternatively, with dependencies already installed:
 
 ```sh
-python3 tag_edit.py song.mp3
+python3 radish.py edit song.mp3
 ```
 
 The editor is selected from `--editor`, `$VISUAL`, `$EDITOR`, then `vim`.
@@ -67,8 +75,8 @@ supported fields manually and work with `--print` and `--dry-run`; `--apply`
 always applies the supported fields present in its YAML, regardless of mode.
 
 ```sh
-tag-edit --all song.mp3
-./dist/tag-edit -A song.flac
+radish edit --all song.mp3
+./dist/radish edit -A song.flac
 ```
 
 Save and quit (`:wq` in Vim) to apply; quit without saving (`:q!`) to leave
@@ -100,12 +108,12 @@ the input and must not change. Documents may be reordered.
 ## Preview and noninteractive use
 
 ```sh
-tag-edit --dry-run song.mp3
-tag-edit --print song.mp3 song.flac > tags.yaml
-tag-edit -A --print song.mp3 song.flac > all-tags.yaml
+radish edit --dry-run song.mp3
+radish edit --print song.mp3 song.flac > tags.yaml
+radish edit -A --print song.mp3 song.flac > all-tags.yaml
 # Edit tags.yaml, then:
-tag-edit --apply tags.yaml --dry-run song.mp3 song.flac
-tag-edit --apply tags.yaml song.mp3 song.flac
+radish edit --apply tags.yaml --dry-run song.mp3 song.flac
+radish edit --apply tags.yaml song.mp3 song.flac
 ```
 
 ## Safety

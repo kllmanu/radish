@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 
+import click
 import mutagen
 from mutagen.easyid3 import EasyID3
 from mutagen.easymp4 import EasyMP4Tags
@@ -247,7 +248,7 @@ def apply_changes(changes):
         for audio, updates in changes:
             ensure_unchanged(audio)
             fd, filename = tempfile.mkstemp(
-                prefix=f".{audio.path.name}.tag-edit-", suffix=audio.path.suffix,
+                prefix=f".{audio.path.name}.radish-", suffix=audio.path.suffix,
                 dir=audio.path.parent,
             )
             os.close(fd)
@@ -315,7 +316,7 @@ def run(args):
         if args.apply:
             edited = Path(args.apply).read_text(encoding="utf-8")
         else:
-            fd, name = tempfile.mkstemp(prefix="tag-edit-", suffix=".yaml")
+            fd, name = tempfile.mkstemp(prefix="radish-", suffix=".yaml")
             buffer = Path(name)
             with os.fdopen(fd, "w", encoding="utf-8") as stream:
                 stream.write(original)
@@ -342,27 +343,63 @@ def run(args):
             buffer.unlink()
 
 
-def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("files", nargs="+", help="MP3, M4A, Opus, or FLAC files")
-    parser.add_argument("--editor", help="editor command (default: $VISUAL, $EDITOR, vim)")
-    parser.add_argument("--all", "-A", dest="all_fields", action="store_true",
-                        help="show all editable fields (default: title, artist, album)")
-    modes = parser.add_mutually_exclusive_group()
-    modes.add_argument("--print", dest="print_tags", action="store_true", help="print editable YAML")
-    modes.add_argument("--apply", metavar="YAML", help="apply a previously exported YAML file")
-    parser.add_argument("--dry-run", action="store_true", help="show changes without writing audio files")
-    args = parser.parse_args(argv)
+def report_error(error):
+    print(f"radish: {error}", file=sys.stderr)
+
+
+def execute(args):
     try:
         run(args)
     except (EditError, OSError, ValueError, yaml.YAMLError, mutagen.MutagenError) as error:
-        print(f"tag-edit: {error}", file=sys.stderr)
+        report_error(error)
         return 1
     except KeyboardInterrupt:
-        print("tag-edit: interrupted", file=sys.stderr)
+        report_error("interrupted")
         return 130
     return 0
 
 
+@click.group()
+def cli():
+    """Edit audio metadata in your text editor, without beets."""
+
+
+@cli.command()
+@click.argument("files", nargs=-1, required=True)
+@click.option("--editor", help="editor command (default: $VISUAL, $EDITOR, vim)")
+@click.option("--all", "-A", "all_fields", is_flag=True,
+              help="show all editable fields (default: title, artist, album)")
+@click.option("--print", "print_tags", is_flag=True, help="print editable YAML")
+@click.option("--apply", "apply_file", metavar="YAML",
+              help="apply a previously exported YAML file")
+@click.option("--dry-run", is_flag=True, help="show changes without writing audio files")
+def edit(files, editor, all_fields, print_tags, apply_file, dry_run):
+    """Edit tags for one or more audio files."""
+    if print_tags and apply_file:
+        raise click.UsageError("--print and --apply cannot be used together")
+    args = argparse.Namespace(
+        files=files,
+        editor=editor,
+        all_fields=all_fields,
+        print_tags=print_tags,
+        apply=apply_file,
+        dry_run=dry_run,
+    )
+    code = execute(args)
+    if code:
+        raise click.exceptions.Exit(code)
+    return code
+
+
+def main(argv=None):
+    try:
+        return edit.main(args=argv, prog_name="radish edit", standalone_mode=False)
+    except click.ClickException as error:
+        error.show()
+        return error.exit_code
+    except click.exceptions.Exit as exit:
+        return exit.exit_code
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    cli()

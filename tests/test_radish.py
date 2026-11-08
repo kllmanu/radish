@@ -19,8 +19,9 @@ from mutagen.flac import Picture
 from mutagen.id3 import APIC, TXXX
 from mutagen.mp4 import MP4Cover
 import yaml
+from click.testing import CliRunner
 
-import tag_edit
+import radish as tag_edit
 
 
 def png():
@@ -121,7 +122,7 @@ class ParsingTests(unittest.TestCase):
 class IntegrationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.fixtures = tempfile.TemporaryDirectory(prefix="tag-edit-fixtures-")
+        cls.fixtures = tempfile.TemporaryDirectory(prefix="radish-fixtures-")
         cls.fixture_dir = Path(cls.fixtures.name)
         for extension, codec in (
             ("mp3", "libmp3lame"), ("m4a", "aac"),
@@ -138,7 +139,7 @@ class IntegrationTests(unittest.TestCase):
         cls.fixtures.cleanup()
 
     def setUp(self):
-        self.workspace = tempfile.TemporaryDirectory(prefix="tag-edit-test-")
+        self.workspace = tempfile.TemporaryDirectory(prefix="radish-test-")
         self.directory = Path(self.workspace.name)
         self.paths = []
         picture = Picture()
@@ -280,7 +281,7 @@ class IntegrationTests(unittest.TestCase):
         for audio in self.files():
             for key in ("title", "comment", "lyrics"):
                 self.assertNotIn(key, audio.values)
-        self.assertFalse(list(self.directory.glob(".*.tag-edit-*")))
+        self.assertFalse(list(self.directory.glob(".*.radish-*")))
 
     def test_artist_sync_in_both_views_for_all_formats(self):
         for all_fields in (False, True):
@@ -346,7 +347,7 @@ class IntegrationTests(unittest.TestCase):
         with self.assertRaisesRegex(tag_edit.EditError, "no originals updated"):
             tag_edit.apply_changes(changes)
         self.assertEqual({path: digest(path) for path in self.paths}, before)
-        self.assertFalse(list(self.directory.glob(".*.tag-edit-*")))
+        self.assertFalse(list(self.directory.glob(".*.radish-*")))
 
     def test_concurrent_modification_rejected(self):
         audio = self.files()[0]
@@ -373,7 +374,7 @@ class IntegrationTests(unittest.TestCase):
         self.assertIn(str(files[0].path), str(raised.exception))
         self.assertEqual(tag_edit.load_audio(files[0].path).values["title"], ["New"])
         self.assertEqual(tag_edit.load_audio(files[1].path).values["title"], ["Original"])
-        self.assertFalse(list(self.directory.glob(".*.tag-edit-*")))
+        self.assertFalse(list(self.directory.glob(".*.radish-*")))
 
     def test_symlink_resolves_to_original_target(self):
         link = self.directory / "link.mp3"
@@ -392,6 +393,14 @@ class IntegrationTests(unittest.TestCase):
             tag_edit.read_files([str(path)])
 
     def test_cli_export_apply_and_dry_run(self):
+        result = CliRunner().invoke(
+            tag_edit.cli, ["edit", "--print", *map(str, self.paths)],
+        )
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertEqual(
+            len(list(yaml.safe_load_all(result.output))),
+            len(self.paths),
+        )
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
             self.assertEqual(tag_edit.main(["--print", *map(str, self.paths)]), 0)
@@ -451,7 +460,7 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("status 7", stderr.getvalue())
         self.assertEqual(digest(self.paths[0]), before)
-        self.assertEqual(len(list(self.directory.glob("tag-edit-*.yaml"))), 1)
+        self.assertEqual(len(list(self.directory.glob("radish-*.yaml"))), 1)
 
     def test_unsupported_and_corrupt_inputs_fail(self):
         path = self.directory / "bad.mp3"
