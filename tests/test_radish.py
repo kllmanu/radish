@@ -246,6 +246,132 @@ class IntegrationTests(unittest.TestCase):
             if audio.kind in ("flac", "opus"):
                 self.assertEqual(audio.values["private"], ["preserve me"])
 
+    def test_edit_moves_and_renames_library_files_from_updated_tags(self):
+        library = self.directory / "Music"
+        source = library / "Old Artist" / "Old Title.m4a"
+        source.parent.mkdir(parents=True)
+        shutil.copy2(self.paths[1], source)
+        audio = mutagen.File(source, easy=True)
+        audio["title"] = ["Old Title"]
+        audio["artist"] = ["Old Artist"]
+        audio["album"] = ["Existing Album"]
+        audio.save()
+        document, = yaml.safe_load_all(tag_edit.render(tag_edit.read_files([str(source)])))
+        document.update({"title": "New Title", "artist": "New Artist"})
+        edited_yaml = self.directory / "edit.yaml"
+        edited_yaml.write_text(yaml.safe_dump_all([document]), encoding="utf-8")
+
+        result = CliRunner().invoke(
+            tag_edit.cli,
+            ["edit", "--apply", str(edited_yaml), "--library", str(library), str(source)],
+        )
+
+        destination = library / "New Artist" / "New Title.m4a"
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertTrue(destination.is_file())
+        self.assertFalse(source.exists())
+        self.assertFalse(source.parent.exists())
+        self.assertEqual(tag_edit.load_audio(destination).values["album"], ["Existing Album"])
+        self.assertIn(f"Moved {source} -> {destination}", result.output)
+
+    def test_editing_album_moves_file_into_album_folder(self):
+        library = self.directory / "Music"
+        source = library / "Artist" / "Song.opus"
+        source.parent.mkdir(parents=True)
+        shutil.copy2(self.paths[2], source)
+        audio = mutagen.File(source, easy=True)
+        audio["title"] = ["Song"]
+        audio["artist"] = ["Artist"]
+        audio["album"] = ["Old Album"]
+        audio.save()
+        document, = yaml.safe_load_all(tag_edit.render(tag_edit.read_files([str(source)])))
+        document["album"] = "New Album"
+        edited_yaml = self.directory / "album.yaml"
+        edited_yaml.write_text(yaml.safe_dump_all([document]), encoding="utf-8")
+
+        result = CliRunner().invoke(
+            tag_edit.cli,
+            ["edit", "--apply", str(edited_yaml), "--library", str(library), str(source)],
+        )
+
+        destination = library / "Artist" / "New Album" / "Song.opus"
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertTrue(destination.is_file())
+        self.assertFalse(source.exists())
+        self.assertEqual(tag_edit.load_audio(destination).values["album"], ["New Album"])
+
+    def test_edit_keeps_external_files_in_place(self):
+        library = self.directory / "Music"
+        source = self.paths[0]
+        document, = yaml.safe_load_all(tag_edit.render(tag_edit.read_files([str(source)])))
+        document["title"] = "Renamed Title"
+        edited_yaml = self.directory / "outside.yaml"
+        edited_yaml.write_text(yaml.safe_dump_all([document]), encoding="utf-8")
+
+        result = CliRunner().invoke(
+            tag_edit.cli,
+            ["edit", "--apply", str(edited_yaml), "--library", str(library), str(source)],
+        )
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertTrue(source.is_file())
+        self.assertFalse((library / "Original Artist" / "Renamed Title.mp3").exists())
+        self.assertEqual(tag_edit.load_audio(source).values["title"], ["Renamed Title"])
+
+    def test_edit_uses_unique_title_name_without_overwriting(self):
+        library = self.directory / "Music"
+        source = library / "Artist" / "Old Title.opus"
+        source.parent.mkdir(parents=True)
+        shutil.copy2(self.paths[2], source)
+        audio = mutagen.File(source, easy=True)
+        audio["title"] = ["Old Title"]
+        audio["artist"] = ["Artist"]
+        audio.save()
+        destination = source.parent / "New Title.opus"
+        destination.write_bytes(b"keep existing")
+        document, = yaml.safe_load_all(tag_edit.render(tag_edit.read_files([str(source)])))
+        document["title"] = "New Title"
+        edited_yaml = self.directory / "collision.yaml"
+        edited_yaml.write_text(yaml.safe_dump_all([document]), encoding="utf-8")
+
+        result = CliRunner().invoke(
+            tag_edit.cli,
+            ["edit", "--apply", str(edited_yaml), "--library", str(library), str(source)],
+        )
+
+        unique_destination = source.parent / "New Title_1.opus"
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertEqual(destination.read_bytes(), b"keep existing")
+        self.assertTrue(unique_destination.is_file())
+        self.assertFalse(source.exists())
+
+    def test_edit_dry_run_shows_move_without_moving_file(self):
+        library = self.directory / "Music"
+        source = library / "Artist" / "Old Title.opus"
+        source.parent.mkdir(parents=True)
+        shutil.copy2(self.paths[2], source)
+        audio = mutagen.File(source, easy=True)
+        audio["title"] = ["Old Title"]
+        audio["artist"] = ["Artist"]
+        audio.save()
+        document, = yaml.safe_load_all(tag_edit.render(tag_edit.read_files([str(source)])))
+        document["title"] = "New Title"
+        edited_yaml = self.directory / "dry-run.yaml"
+        edited_yaml.write_text(yaml.safe_dump_all([document]), encoding="utf-8")
+
+        result = CliRunner().invoke(
+            tag_edit.cli,
+            [
+                "edit", "--dry-run", "--apply", str(edited_yaml),
+                "--library", str(library), str(source),
+            ],
+        )
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn(f"move to: {source.parent / 'New Title.opus'}", result.output)
+        self.assertTrue(source.is_file())
+        self.assertFalse((source.parent / "New Title.opus").exists())
+
     def test_all_formats_edit_delete_preserve_art_and_audio(self):
         files = self.files()
         documents = self.documents(files)

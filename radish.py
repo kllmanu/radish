@@ -232,21 +232,24 @@ def import_sources(sources):
 
 
 def artist_directory_name(artist):
+    return safe_path_component(artist, "artist")
+
+
+def safe_path_component(value, label):
     name = "".join(
         "_" if character in '<>:"/\\|?*' or ord(character) < 32 else character
-        for character in artist
+        for character in value
     ).strip().rstrip(".")
     if name in ("", ".", ".."):
-        raise EditError(f"Invalid artist name for a folder: {artist!r}")
+        raise EditError(f"Invalid {label} name for a folder: {value!r}")
     return name
 
 
-def choose_import_destination(source, artist, library, reserved):
-    artist_directory = library / artist_directory_name(artist)
-    for suffix in range(0, 1_000_000):
-        name = source.name if suffix == 0 else f"{source.stem}_{suffix}{source.suffix}"
-        destination = artist_directory / name
-        if source == destination.resolve():
+def choose_unique_destination(directory, stem, extension, reserved, source=None):
+    for number in range(0, 1_000_000):
+        name = stem if number == 0 else f"{stem}_{number}"
+        destination = directory / f"{name}{extension}"
+        if source is not None and source == destination.resolve():
             return destination
         key = (str(destination.parent).casefold(), destination.stem.casefold())
         if key in reserved:
@@ -260,7 +263,43 @@ def choose_import_destination(source, artist, library, reserved):
             continue
         reserved.add(key)
         return destination
-    raise EditError(f"{artist_directory}: could not generate a unique filename")
+    raise EditError(f"{directory}: could not generate a unique filename")
+
+
+def choose_import_destination(source, artist, library, reserved):
+    directory = library / artist_directory_name(artist)
+    return choose_unique_destination(
+        directory, source.stem, source.suffix, reserved, source=source,
+    )
+
+
+def choose_edit_destination(audio, updates, library, reserved):
+    if not any(key in updates for key in ("artist", "title", "album")):
+        return audio.path
+    try:
+        audio.path.relative_to(library)
+    except ValueError:
+        return audio.path
+
+    artist_values = updates.get("artist", audio.values.get("artist", []))
+    artist = next(
+        (value.strip() for value in artist_values if value.strip()),
+        None,
+    )
+    if artist is None:
+        raise EditError(f"{audio.path}: cannot organize edited file without an artist")
+    title_values = updates.get("title", audio.values.get("title", []))
+    title = next((value.strip() for value in title_values if value.strip()), audio.path.stem)
+    directory = library / artist_directory_name(artist)
+    if "album" in updates:
+        album_values = updates["album"]
+        album = next((value.strip() for value in album_values if value.strip()), None)
+        if album:
+            directory /= safe_path_component(album, "album")
+    return choose_unique_destination(
+        directory, safe_path_component(title, "title"), audio.path.suffix,
+        reserved, source=audio.path,
+    )
 
 
 def import_plan(sources, library):
@@ -285,9 +324,6 @@ def import_plan(sources, library):
         if artist is None:
             raise EditError(f"{source}: missing artist tag; refusing to import")
 
-        destination = library / artist_directory_name(artist) / source.name
-        if source == destination.resolve():
-            continue
         destination = choose_import_destination(source, artist, library, reserved)
         if source != destination.resolve():
             plan.append((source, destination, artist))
@@ -318,7 +354,7 @@ def move_without_overwrite(source, destination):
             temporary.unlink(missing_ok=True)
     try:
         source.unlink()
-    except OSError:
+    except (OSError, EditError):
         destination.unlink(missing_ok=True)
         raise
 
@@ -478,10 +514,42 @@ def ensure_unchanged(audio):
         raise EditError(f"{audio.path}: file changed since opening; refusing to overwrite it")
 
 
-def apply_changes(changes):
+def plan_edit_destinations(changes, library):
+    library = Path(library).expanduser().resolve()
+    reserved = set()
+    return {
+        audio.path: choose_edit_destination(audio, updates, library, reserved)
+        for audio, updates in changes
+    }, reserved
+
+
+def cleanup_empty_library_folders(path, library):
+    parent = path.parent
+    while parent != library and parent.is_relative_to(library):
+        try:
+            parent.rmdir()
+            parent_fd = os.open(parent.parent, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(parent_fd)
+            finally:
+                os.close(parent_fd)
+        except OSError as error:
+            if error.errno in (errno.ENOTEMPTY, errno.EEXIST):
+                break
+            if error.errno == errno.ENOENT:
+                parent = parent.parent
+                continue
+            raise
+        parent = parent.parent
+
+
+def apply_changes(changes, library="~/Music"):
     staged = []
     committed = []
+    relocations = []
     try:
+        library = Path(library).expanduser().resolve()
+        destinations, reserved = plan_edit_destinations(changes, library)
         for audio, updates in changes:
             ensure_unchanged(audio)
             fd, filename = tempfile.mkstemp(
@@ -490,7 +558,7 @@ def apply_changes(changes):
             )
             os.close(fd)
             temporary = Path(filename)
-            staged.append((audio, temporary))
+            staged.append((audio, temporary, updates))
             shutil.copy2(audio.path, temporary)
             ensure_unchanged(audio)
             editable = mutagen.File(temporary, easy=True)
@@ -514,24 +582,48 @@ def apply_changes(changes):
                     )
             with temporary.open("rb") as stream:
                 os.fsync(stream.fileno())
-        # All files must stage successfully before any original is replaced.
-        for audio, temporary in staged:
+        for audio, temporary, _ in staged:
             ensure_unchanged(audio)
-        for audio, temporary in staged:
+        for destination in destinations.values():
+            destination.parent.mkdir(parents=True, exist_ok=True)
+        for audio, temporary, updates in staged:
             ensure_unchanged(audio)
-            os.replace(temporary, audio.path)
-            committed.append(str(audio.path))
-            directory_fd = os.open(audio.path.parent, os.O_RDONLY | os.O_DIRECTORY)
-            try:
-                os.fsync(directory_fd)
-            finally:
-                os.close(directory_fd)
+            destination = destinations[audio.path]
+            if destination == audio.path:
+                os.replace(temporary, audio.path)
+            else:
+                while True:
+                    try:
+                        move_without_overwrite(temporary, destination)
+                        break
+                    except FileExistsError:
+                        destination = choose_edit_destination(
+                            audio, updates, library, reserved,
+                        )
+                        destination.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    ensure_unchanged(audio)
+                    audio.path.unlink()
+                except (OSError, EditError):
+                    destination.unlink(missing_ok=True)
+                    raise
+                relocations.append((audio.path, destination))
+            committed.append(str(destination))
+            for directory in {audio.path.parent, destination.parent}:
+                directory_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+                try:
+                    os.fsync(directory_fd)
+                finally:
+                    os.close(directory_fd)
+            if destination != audio.path:
+                cleanup_empty_library_folders(audio.path, library)
     except (OSError, ValueError, mutagen.MutagenError, EditError) as error:
         detail = f"; already updated: {', '.join(committed)}" if committed else "; no originals updated"
         raise EditError(f"Could not apply tags: {error}{detail}") from error
     finally:
-        for _, temporary in staged:
+        for _, temporary, _ in staged:
             temporary.unlink(missing_ok=True)
+    return relocations
 
 
 def editor_command(override):
@@ -563,12 +655,18 @@ def run(args):
             edited = buffer.read_text(encoding="utf-8")
         changes = parse_changes(edited, files)
         if args.dry_run:
+            destinations, _ = plan_edit_destinations(changes, args.library_path)
             for audio, updates in changes:
                 print(f"{audio.path}:")
                 for key, values in updates.items():
                     print(f"  {key}: {audio.values.get(key, [])!r} -> {values!r}")
+                destination = destinations[audio.path]
+                if destination != audio.path:
+                    print(f"  move to: {destination}")
         else:
-            apply_changes(changes)
+            relocations = apply_changes(changes, args.library_path)
+            for source, destination in relocations:
+                print(f"Moved {source} -> {destination}")
         print(f"{'Would update' if args.dry_run else 'Updated'} {len(changes)} file(s).")
     except (EditError, OSError, ValueError, yaml.YAMLError, mutagen.MutagenError,
             KeyboardInterrupt):
@@ -665,7 +763,11 @@ def import_command(paths, library_path):
 @click.option("--apply", "apply_file", metavar="YAML",
               help="apply a previously exported YAML file")
 @click.option("--dry-run", is_flag=True, help="show changes without writing audio files")
-def edit(files, editor, all_fields, print_tags, apply_file, dry_run):
+@click.option(
+    "--library", "library_path", envvar="RADISH_LIBRARY", default="~/Music",
+    show_default=True, help="music library directory (default: ~/Music or $RADISH_LIBRARY)",
+)
+def edit(files, editor, all_fields, print_tags, apply_file, dry_run, library_path):
     """Edit tags for one or more audio files."""
     if print_tags and apply_file:
         raise click.UsageError("--print and --apply cannot be used together")
@@ -676,6 +778,7 @@ def edit(files, editor, all_fields, print_tags, apply_file, dry_run):
         print_tags=print_tags,
         apply=apply_file,
         dry_run=dry_run,
+        library_path=library_path,
     )
     code = execute(args)
     if code:

@@ -124,6 +124,13 @@ Save and quit (`:wq` in Vim) to apply; quit without saving (`:q!`) to leave
 tags unchanged. YAML documents correspond to input files in order, so preserve
 their order when editing or applying exported YAML.
 
+When an edited file is inside the configured music library (`~/Music`,
+`RADISH_LIBRARY`, or `--library`), changing its artist or title moves/renames it
+to `Artist/Title.ext`. Changing the album tag moves it to
+`Artist/Album/Title.ext` (or back to `Artist/Title.ext` if the album is cleared).
+Files outside the library stay in place. Name collisions get `_1`, `_2`, etc.;
+existing files are never overwritten.
+
 - Set a field to blank, `null`, `''`, or `[]` to delete its tag.
 - Removing a field's entire line **preserves** the existing tag.
 - Editing `artist` updates both `artist` and `albumartist`, including deletion
