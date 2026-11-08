@@ -53,13 +53,26 @@ class ParsingTests(unittest.TestCase):
         )
 
     def parse(self, fields):
-        return tag_edit.parse_changes("file: /music/song.flac\n" + fields, [self.audio])
+        return tag_edit.parse_changes(fields, [self.audio])
 
     def test_default_fields_include_missing_values(self):
         document, = yaml.safe_load_all(tag_edit.render([self.audio]))
-        self.assertEqual(list(document), ["file", "title", "artist", "album"])
+        self.assertEqual(list(document), ["title", "artist", "album"])
         self.assertEqual(document["title"], "Original")
         self.assertIsNone(document["album"])
+
+    def test_documents_match_input_order(self):
+        second = tag_edit.Audio(
+            Path("/music/second.flac"), "flac", {"title": ["Second"]}, (),
+        )
+        changes = tag_edit.parse_changes(
+            "title: First edited\n---\ntitle: Second edited\n",
+            [self.audio, second],
+        )
+        self.assertEqual(changes, [
+            (self.audio, {"title": ["First edited"]}),
+            (second, {"title": ["Second edited"]}),
+        ])
 
     def test_all_fields_include_existing_and_common_fields(self):
         self.audio.values["custom"] = ["Value"]
@@ -112,7 +125,7 @@ class ParsingTests(unittest.TestCase):
         ):
             with self.subTest(fields=fields), self.assertRaises(tag_edit.EditError):
                 self.parse(fields)
-        with self.assertRaises(tag_edit.EditError):
+        with self.assertRaisesRegex(tag_edit.EditError, "unsupported field 'file'"):
             tag_edit.parse_changes("file: /different\n", [self.audio])
         with self.assertRaises(tag_edit.EditError):
             tag_edit.parse_changes("", [self.audio])
@@ -197,8 +210,8 @@ class IntegrationTests(unittest.TestCase):
                     ]), 0)
                 exported = list(yaml.safe_load_all(output.getvalue()))
                 for document, audio in zip(exported, files):
-                    expected = ({"file", *tag_edit.COMMON, *audio.values}
-                                if flags else {"file", *tag_edit.IMPORTANT})
+                    expected = (set(tag_edit.COMMON) | set(audio.values)
+                                if flags else set(tag_edit.IMPORTANT))
                     self.assertEqual(set(document), expected)
 
                 captured = []
@@ -223,7 +236,7 @@ class IntegrationTests(unittest.TestCase):
         files = self.files()
         documents = list(yaml.safe_load_all(tag_edit.render(files)))
         for document in documents:
-            self.assertEqual(set(document), {"file", *tag_edit.IMPORTANT})
+            self.assertEqual(set(document), set(tag_edit.IMPORTANT))
             document["title"] = "New title"
         tag_edit.apply_changes(tag_edit.parse_changes(yaml.safe_dump_all(documents), files))
         for audio in self.files():
@@ -237,10 +250,10 @@ class IntegrationTests(unittest.TestCase):
         files = self.files()
         documents = self.documents(files)
         before = {path: audio_digest(path) for path in self.paths}
-        for document in documents:
+        for document, audio in zip(documents, files):
             document.update({
                 "title": "A new title \u00e9",
-                "artist": ["Alice"] if document["file"].endswith(".mp3") else ["Alice", "Bob"],
+                "artist": ["Alice"] if audio.kind == "mp3" else ["Alice", "Bob"],
                 "track": "6/12", "disc": "1/2", "date": "2026",
                 "comment": "Hello", "composer": "Composer", "lyrics": "Line one\nLine two",
                 "genre": "Rock",

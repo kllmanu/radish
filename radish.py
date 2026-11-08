@@ -95,10 +95,10 @@ COMMON = ("album", "artist", "albumartist", "title", "track", "disc",
           "date", "genre", "composer", "comment")
 ALIASES = {"track": "tracknumber", "disc": "discnumber"}
 REVERSE_ALIASES = {value: key for key, value in ALIASES.items()}
-HIDDEN_FIELDS = {"metadata_block_picture", "coverart", "coverartmime"}
+HIDDEN_FIELDS = {"file", "metadata_block_picture", "coverart", "coverartmime"}
 HEADER = (
     "# Edit values, save, and quit to apply. Quit without saving to cancel.\n"
-    "# Keep 'file' unchanged. Blank/null/[] deletes a tag; omitted fields stay unchanged.\n"
+    "# Documents match input files in order. Blank/null/[] deletes a tag; omitted fields stay unchanged.\n"
     "# Multiple values: artist: [First Artist, Second Artist]\n"
 )
 
@@ -168,7 +168,7 @@ def read_files(filenames):
 def render(files, all_fields=False):
     documents = []
     for audio in files:
-        document = {"file": str(audio.path)}
+        document = {}
         fields = dict.fromkeys((*COMMON, *sorted(audio.values))) if all_fields else IMPORTANT
         for key in fields:
             values = audio.values.get(key, [])
@@ -192,24 +192,17 @@ def supported(audio, key):
 
 def parse_changes(text, files):
     documents = list(yaml.load_all(text, Loader=TagLoader))
-    expected = {str(audio.path): audio for audio in files}
     if len(documents) != len(files):
         raise EditError("Keep exactly one YAML document for each input file")
-    seen = set()
     changes = []
-    for document in documents:
-        if not isinstance(document, dict) or not isinstance(document.get("file"), str):
-            raise EditError("Each YAML document needs an unchanged 'file' field")
-        path = document["file"]
-        if path not in expected or path in seen:
-            raise EditError(f"Unknown or duplicate file identifier: {path}")
-        seen.add(path)
-        audio = expected[path]
+    for document, audio in zip(documents, files):
+        if not isinstance(document, dict):
+            raise EditError("Each YAML document must contain a mapping of tags")
+        path = str(audio.path)
         updates = {}
         for key, value in document.items():
-            if key == "file":
-                continue
-            if key != key.lower() or key in REVERSE_ALIASES or not supported(audio, key):
+            if (key != key.lower() or key in REVERSE_ALIASES
+                    or not supported(audio, key)):
                 raise EditError(f"{path}: unsupported field {key!r}; use 'track'/'disc' aliases")
             if value is None or value == "":
                 values = []

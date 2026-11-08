@@ -57,11 +57,10 @@ Commands are parsed as arguments, not run through a shell.
 Use `--` before filenames starting with a dash.
 
 By default, each input gets only the three most important tags in the same
-YAML buffer, plus the unchanged file identifier:
+YAML buffer:
 
 ```yaml
 ---
-file: /music/song.mp3
 title: Butterfly
 artist: Crazy Town
 album: The Gift Of Game
@@ -80,8 +79,8 @@ radish edit --all song.mp3
 ```
 
 Save and quit (`:wq` in Vim) to apply; quit without saving (`:q!`) to leave
-tags unchanged. There is no beets `id`; the absolute `file` field identifies
-the input and must not change. Documents may be reordered.
+tags unchanged. YAML documents correspond to input files in order, so preserve
+their order when editing or applying exported YAML.
 
 - Set a field to blank, `null`, `''`, or `[]` to delete its tag.
 - Removing a field's entire line **preserves** the existing tag.
