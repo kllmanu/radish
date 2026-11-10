@@ -823,7 +823,7 @@ class IntegrationTests(unittest.TestCase):
             )
 
             self.assertEqual(result.exit_code, 0, result.output)
-            default_playlist = playlist_dir / "Summer Singles.m3u"
+            default_playlist = playlist_dir / "Summer Singles"
             self.assertTrue(default_playlist.exists(), result.output)
             imported = library / "Playlist Artist" / "summer.opus"
             self.assertEqual(
@@ -845,7 +845,7 @@ class IntegrationTests(unittest.TestCase):
             )
 
         self.assertEqual(result.exit_code, 0, result.output)
-        custom_playlist = playlist_dir / "My Custom Mix.m3u"
+        custom_playlist = playlist_dir / "My Custom Mix"
         self.assertTrue(custom_playlist.is_file())
         self.assertIn("Playlist name [second]", result.output)
 

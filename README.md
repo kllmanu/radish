@@ -15,7 +15,9 @@ tldr; I've got annoyed with beets to tag my music, I usually just download songs
 
 Make sure to have cmus, tmux, fzf and vim installed.
 
-Then run `make install`
+Then run `make install`. This installs the Bash completion script to
+`~/.local/share/bash-completion/completions/radish`; restart Bash or source that
+file to enable completion.
 
 ## Config
 

@@ -433,7 +433,7 @@ def write_cmus_playlist(destinations, name):
     playlist_dir.mkdir(parents=True, exist_ok=True)
     for suffix in range(0, 1_000_000):
         basename = name if suffix == 0 else f"{name}_{suffix}"
-        playlist = playlist_dir / f"{basename}.m3u"
+        playlist = playlist_dir / basename
         try:
             with playlist.open("x", encoding="utf-8", newline="\n") as stream:
                 stream.write("#EXTM3U\n")
