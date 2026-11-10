@@ -745,11 +745,12 @@ def artists(paths, library_path):
 @cli.command("import")
 @click.argument("paths", nargs=-1, required=True, type=click.Path(path_type=Path))
 @click.option(
-    "--library", "library_path", envvar="RADISH_LIBRARY", default="~/Music",
-    show_default=True, help="music library directory (default: ~/Music or $RADISH_LIBRARY)",
+    "--library", "library_path", envvar="RADISH_LIBRARY", default="~/Music/Singletons",
+    show_default=True,
+    help="music library directory (default: ~/Music/Singletons or $RADISH_LIBRARY)",
 )
 def import_command(paths, library_path):
-    """Move singles into ~/Music/<artist>/ without album subfolders."""
+    """Move singles into ~/Music/Singletons/<artist>/ without album subfolders."""
     try:
         playlist_name = suggested_playlist_name(paths)
         destinations = import_music(paths, library_path)

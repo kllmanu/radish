@@ -30,7 +30,7 @@ bind -f common D shell cmus-delete
 
 ## Import
 
-Radish comes with an import subcommand, call `radish import [OPTIONS] PATHS...` to import files or folders into your `~/Music` directory.
+Radish comes with an import subcommand, call `radish import [OPTIONS] PATHS...` to import files or folders into your `~/Music/Singletons` directory.
 
 ## Vim
 
