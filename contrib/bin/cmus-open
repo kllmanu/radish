@@ -9,11 +9,19 @@ if [[ $comment =~ ^https?:// ]]; then
 	url="$comment&t=$((position + 2))"
 
 	cmus-remote --raw "echo open $url"
-    gio open $url
+    gio open "$url"
 
-	sleep 2
+    sleep 2
 
-	cmus-remote --pause
+    if command -v ydotool >/dev/null 2>&1; then
+        if ! ydotool key 125:1 102:1 102:0 125:0; then
+            echo "Failed to switch to GNOME workspace 1 with ydotool" >&2
+        fi
+    else
+        echo "ydotool is required to switch to GNOME workspace 1 on Wayland" >&2
+    fi
+
+    cmus-remote --pause
 else
 	cmus-remote --raw "echo No url in comment found"
 fi
