@@ -2,7 +2,7 @@
 
 an **opinionated**, vibe-coded [beets](https://beets.io) alternative
 
-tldr; I've got annoyed with beets to tag my music, I usually just download songs with `yt-dlp` and they already come with some meta data anyways. I want to have less artists (even if there are feat. or compilations) rather than multiple. I just prefer to organize my music library my own way. And I usually do so while listening to them with cmus inside a tmux session. Also I'm lazy, so fzf comes in handy. Oh and let's not forget about vim. 
+tldr; I've got annoyed with beets to tag my music, I usually just download songs with `yt-dlp` and they already come with some meta data anyways. I want to have less artists (even if there are feat. or compilations) rather than multiple. I just prefer to organize my music library my own way. And I usually do so while listening to them with `cmus` inside a `tmux` session. Also I'm lazy, so `fzf` comes in handy. Oh and let's not forget about `vim`. 
 
 ## Differences
 
