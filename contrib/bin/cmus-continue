@@ -1,0 +1,17 @@
+#!/bin/bash
+
+cmus-remote -Q >/dev/null 2>&1 || exit 0
+
+cmus-remote --raw "update-cache"
+cmus-remote -l ~/Music
+
+file="$(find ~/Music -type f -printf '%T@ %p\n' | sort -n | tail -1 | cut -d' ' -f2-)"
+position="$(cmus-remote --query | grep position | awk '{print $2}')"
+
+if cmus-remote -Q | grep -q "^set play_library true"; then
+	cmus-remote --raw "filter filename=\"$file\""
+	cmus-remote --raw "win-activate"
+	cmus-remote --seek $position
+	cmus-remote --raw "filter"
+	cmus-remote --raw "win-sel-cur"
+fi

@@ -1,0 +1,19 @@
+#!/bin/bash
+
+metadata=$(cmus-remote --query)
+
+position=$(echo "$metadata" | grep position | awk '{print $2}')
+comment=$(echo "$metadata" | grep comment | awk '{print $3}')
+
+if [[ $comment =~ ^https?:// ]]; then
+	url="$comment&t=$((position + 2))"
+
+	cmus-remote --raw "echo open $url"
+    gio open $url
+
+	sleep 2
+
+	cmus-remote --pause
+else
+	cmus-remote --raw "echo No url in comment found"
+fi

@@ -1,0 +1,10 @@
+#!/bin/bash
+
+metadata=$(cmus-remote --query)
+file="$(echo "$metadata" | grep file | awk '{print $1=""; print $0}')"
+
+cmus-remote --raw "win-sel-cur"
+cmus-remote --raw "echo gio trash {}"
+cmus-remote --raw "win-remove"
+
+gio trash "$file"

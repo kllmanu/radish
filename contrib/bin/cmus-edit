@@ -1,0 +1,19 @@
+#!/bin/bash
+
+metadata=$(cmus-remote --query)
+file=$(printf '%s\n' "$metadata" |
+  awk '$1 == "file" { sub(/^[^[:space:]]+[[:space:]]+/, ""); print; exit }')
+
+if [[ -z "$file" ]]; then
+  echo "No current file reported by cmus" >&2
+  exit 1
+fi
+
+printf -v quoted_file '%q' "$file"
+quoted_args=
+if (($#)); then
+  printf -v quoted_args '%q ' "$@"
+fi
+
+cmus-remote --raw "win-sel-cur"
+tmux new-window "exec radish edit ${quoted_args}-- ${quoted_file}"
