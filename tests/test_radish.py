@@ -412,6 +412,52 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(result.exit_code, 0, result.output)
         continue_cmus.assert_not_called()
 
+    def test_clean_removes_only_album_without_relocating_files(self):
+        library = self.directory / "Music" / "Singletons"
+        source = library / "Original Artist" / "song"
+        source.parent.mkdir(parents=True)
+        paths = []
+        for fixture in self.paths:
+            destination = source.with_suffix(fixture.suffix)
+            shutil.copy2(fixture, destination)
+            audio = mutagen.File(destination, easy=True)
+            audio["albumartist"] = ["Keep this album artist"]
+            audio.save()
+            paths.append(destination)
+
+        with patch.object(tag_edit, "continue_cmus") as continue_cmus:
+            result = CliRunner().invoke(
+                tag_edit.cli, ["clean", "--library", str(library)],
+            )
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        continue_cmus.assert_called_once_with()
+        self.assertIn(f"{paths[0]}\n", result.output)
+        self.assertIn("Cleaned 4 file(s).", result.output)
+        for path in paths:
+            self.assertTrue(path.is_file())
+            audio = tag_edit.load_audio(path)
+            self.assertNotIn("album", audio.values)
+            self.assertEqual(audio.values["albumartist"], ["Keep this album artist"])
+
+    def test_clean_dry_run_does_not_change_tags_or_continue_cmus(self):
+        library = self.directory / "Music" / "Singletons"
+        source = library / "Original Artist" / "song"
+        source.parent.mkdir(parents=True)
+        shutil.copy2(self.paths[0], source.with_suffix(self.paths[0].suffix))
+        path = source.with_suffix(self.paths[0].suffix)
+
+        with patch.object(tag_edit, "continue_cmus") as continue_cmus:
+            result = CliRunner().invoke(
+                tag_edit.cli, ["clean", "--dry-run", "--library", str(library)],
+            )
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn(f"{path}\n", result.output)
+        self.assertIn("Would clean 1 file(s).", result.output)
+        continue_cmus.assert_not_called()
+        self.assertEqual(tag_edit.load_audio(path).values["album"], ["Keep this album"])
+
     def test_all_formats_edit_delete_preserve_art_and_audio(self):
         files = self.files()
         documents = self.documents(files)

@@ -34,6 +34,10 @@ bind -f common D shell cmus-delete
 
 Radish comes with an import subcommand, call `radish import [OPTIONS] PATHS...` to import files or folders into your `~/Music/Singletons` directory.
 
+## Clean
+
+Run `radish clean` to remove album tags from every supported audio file in `~/Music/Singletons`. Use `--dry-run` to preview the number of files that would be changed. Use `--library PATH` or `RADISH_LIBRARY` to select another library.
+
 ## Vim
 
 Radish comes with a bunch of utilities to help you edit meta data.

@@ -543,13 +543,18 @@ def cleanup_empty_library_folders(path, library):
         parent = parent.parent
 
 
-def apply_changes(changes, library="~/Music"):
+def apply_changes(changes, library="~/Music", relocate=True):
     staged = []
     committed = []
     relocations = []
     try:
         library = Path(library).expanduser().resolve()
-        destinations, reserved = plan_edit_destinations(changes, library)
+        if relocate:
+            destinations, reserved = plan_edit_destinations(changes, library)
+        else:
+            destinations, reserved = (
+                {audio.path: audio.path for audio, _ in changes}, set()
+            )
         for audio, updates in changes:
             ensure_unchanged(audio)
             fd, filename = tempfile.mkstemp(
@@ -705,6 +710,30 @@ def execute(args):
     return 0
 
 
+def clean_library(library, dry_run=False):
+    library = Path(library).expanduser().resolve()
+    if not library.exists():
+        raise EditError(f"{library}: path does not exist")
+    if not library.is_dir():
+        raise EditError(f"{library}: library path is not a directory")
+    paths = sorted(
+        path.resolve()
+        for path in library.rglob("*")
+        if not path.is_symlink()
+        and path.is_file()
+        and path.suffix.lower() in SUPPORTED_AUDIO_SUFFIXES
+    )
+    files = read_files(paths)
+    changes = [
+        (audio, {"album": []})
+        for audio in files
+        if audio.values.get("album")
+    ]
+    if not dry_run:
+        apply_changes(changes, library, relocate=False)
+    return [audio.path for audio, _ in changes]
+
+
 @click.group()
 def cli():
     """Edit audio metadata in your text editor, without beets."""
@@ -762,6 +791,27 @@ def import_command(paths, library_path):
             )
             playlist = write_cmus_playlist(destinations, name)
             click.echo(f"Created playlist: {playlist}")
+    except (EditError, OSError, ValueError, mutagen.MutagenError) as error:
+        raise click.ClickException(str(error)) from error
+
+
+@cli.command()
+@click.option(
+    "--library", "library_path", envvar="RADISH_LIBRARY", default="~/Music/Singletons",
+    show_default=True,
+    help="music library directory (default: ~/Music/Singletons or $RADISH_LIBRARY)",
+)
+@click.option("--dry-run", is_flag=True, help="show affected files without changing tags")
+def clean(library_path, dry_run):
+    """Remove album tags from the music library."""
+    try:
+        paths = clean_library(library_path, dry_run=dry_run)
+        for path in paths:
+            click.echo(path)
+        if paths and not dry_run:
+            continue_cmus()
+        action = "Would clean" if dry_run else "Cleaned"
+        click.echo(f"{action} {len(paths)} file(s).")
     except (EditError, OSError, ValueError, mutagen.MutagenError) as error:
         raise click.ClickException(str(error)) from error
 
