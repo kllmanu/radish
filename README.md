@@ -1,193 +1,41 @@
 # radish
 
-Edit MP3, M4A, Opus, and FLAC metadata in Vim or any other text editor.
-No beets, database, importing, transcoding, or Vim plugin required.
-Python 3.10+, Click, Mutagen, and PyYAML are required.
-The standalone binary bundles Python and its dependencies.
+an **opinionated**, vibe-coded [beets](https://beets.io) alternative
 
-## Standalone binary
+## Differences
 
-Run the Linux x86-64 executable directly:
+- focus on singleton libraries as I don't have (m)any albums these days anyways
+- no autotagging capabilities, metadata has to be edited by hand
+- ships with batteries included for [cmus](https://cmus.github.io), vim and tmux
+- uses [fzf](https://github.com/junegunn/fzf) to select artists
 
-```sh
-./dist/radish edit song.mp3 song.m4a song.opus song.flac
+## Install
+
+Make sure to have cmus, tmux, fzf and vim installed.
+
+Then run `make install`
+
+## Config
+
+In order to edit meta data, your cmus config has to add the following bindings:
+
+```
+bind -f common o shell cmus-open
+bind -f common e shell cmus-edit
+bind -f common E shell cmus-edit --all
+bind -f common D shell cmus-delete
 ```
 
-To rebuild on your target operating system and architecture:
+## Import
 
-```sh
-make build
+Radish comes with an import subcommand, call `radish import [OPTIONS] PATHS...` to import files or folders into your `~/Music` directory.
+
+## Vim
+
+Radish comes with a bunch of utilities to help you edit meta data.
+
 ```
-
-The executable is written to `dist/radish`. No Python installation is needed
-to run it, but a text editor and compatible system libraries are still required.
-Linux builds are not fully static; build on the oldest Linux distribution you
-intend to support. The one-file executable extracts its runtime into a temporary
-directory at startup.
-
-## Development
-
-```sh
-make install
-make test
-make build
+nnoremap <leader>a :call ReplaceArtists()<CR>
+nnoremap <leader>A :call ClearAlbums()<CR>
+nnoremap <leader>t :call SanitizeTitles()<CR>
 ```
-
-`make build` installs the optional PyInstaller dependency before building.
-Set `PYTHON` to choose another Python executable, e.g. `make test PYTHON=.venv/bin/python`.
-
-## Install and use
-
-```sh
-python3 -m pip install --user .
-radish edit song.mp3 album/*.flac
-EDITOR=nvim radish edit song.m4a song.opus
-radish edit --editor 'vim -f' song.mp3
-```
-
-Alternatively, with dependencies already installed:
-
-```sh
-python3 radish.py edit song.mp3
-```
-
-The editor is selected from `--editor`, `$VISUAL`, `$EDITOR`, then `vim`.
-Use a foreground/wait flag for GUI editors, e.g. `--editor 'code --wait'`.
-Commands are parsed as arguments, not run through a shell.
-Use `--` before filenames starting with a dash.
-
-## Choose an artist
-
-`radish artists` opens `fzf` with unique track artists from the library and
-prints the selection. It scans `~/Music` recursively by default; `fzf` must be
-installed. Set `RADISH_LIBRARY` or use `--library` to choose another default
-directory. Paths passed after the command override that default and can be
-files or directories:
-
-```sh
-radish artists
-RADISH_LIBRARY=/music/library radish artists
-radish artists /music/other-library
-```
-
-In Vim, call Radish directly and use its output as the selected artist:
-
-```vim
-let artist = system('radish artists')
-let artist = substitute(artist, '\n\+$', '', '')
-```
-
-## Import singles
-
-`radish import` moves audio files into `~/Music/<artist>/`, using the first
-non-empty `artist` tag. It does not create album or single-title subfolders.
-Pass one or more files or directories; directories are scanned recursively.
-Set `RADISH_LIBRARY` or use `--library` to choose another destination. Existing
-destination files are never overwritten: colliding names get `_1`, `_2`, etc.
-before the extension. Files without an artist tag are rejected before any move
-is started. Imported files are removed from their source; source directories
-are removed only when empty, so unrelated files are kept. After importing,
-Radish asks whether to create a cmus `.m3u` playlist in
-`~/.config/cmus/playlists/`. It suggests a name from the source folder; accept
-the default or enter a different name. Existing playlists are not overwritten;
-a numeric suffix is added when needed.
-
-```sh
-radish import song.opus another-song.flac
-radish import /path/to/incoming-folder
-radish import *.opus --library /music/library
-```
-
-By default, each input gets only the three most important tags in the same
-YAML buffer:
-
-```yaml
----
-title: Butterfly
-artist: Crazy Town
-album: The Gift Of Game
-```
-
-Use `--all` or `-A` to show the full editable view: common fields (including
-track, disc, date, genre, composer, and comment) plus all existing supported
-text fields. Artwork, binary tags, and unsupported metadata stay hidden.
-Tags not shown in the default view are preserved. Both modes allow adding
-supported fields manually and work with `--print` and `--dry-run`; `--apply`
-always applies the supported fields present in its YAML, regardless of mode.
-
-```sh
-radish edit --all song.mp3
-./dist/radish edit -A song.flac
-```
-
-Save and quit (`:wq` in Vim) to apply; quit without saving (`:q!`) to leave
-tags unchanged. YAML documents correspond to input files in order, so preserve
-their order when editing or applying exported YAML.
-
-When an edited file is inside the configured music library (`~/Music`,
-`RADISH_LIBRARY`, or `--library`), changing its artist or title moves/renames it
-to `Artist/Title.ext`. Changing the album tag moves it to
-`Artist/Album/Title.ext` (or back to `Artist/Title.ext` if the album is cleared).
-Files outside the library stay in place. Name collisions get `_1`, `_2`, etc.;
-existing files are never overwritten. After a successful edit that changes
-tags, Radish runs `cmus-continue` from `PATH` to refresh playback; no-op edits,
-`--print`, and `--dry-run` do not run it.
-
-- Set a field to blank, `null`, `''`, or `[]` to delete its tag.
-- Removing a field's entire line **preserves** the existing tag.
-- Editing `artist` updates both `artist` and `albumartist`, including deletion
-  and multiple values. In the full view, editing `albumartist` works the same
-  way. Existing differences remain untouched unless either field is edited.
-  If both fields are changed to different values, the edit is rejected.
-- Use YAML lists for multiple values: `artist: [Alice, Bob]`.
-  MP3 ID3v2.3 text frames cannot store separate values losslessly; such edits
-  are rejected. ID3v2.4, M4A, FLAC, and Opus support multiple text values.
-- `track` and `disc` accept `number/total`, e.g. `'6/12'`.
-- Dates, leading zeroes, and words like `yes` are treated as text.
-- With `--all`/`-A`, existing supported text fields appear automatically. MP3/M4A accept
-  Mutagen's easy-tag fields, plus comments, lyrics, and composer.
-  FLAC/Opus also accept arbitrary Vorbis comment fields (lowercase keys).
-- Artwork, binary tags, and unsupported metadata are not exposed in YAML.
-  They remain in the file; only changed fields are written.
-- Editing MP3 comments/lyrics replaces all existing language/description
-  variants of that field. Unchanged variants are preserved.
-- MP4 numeric tags have format-specific limits and normalization. Values
-  that do not round-trip exactly (including leading zeroes in MP4 track
-  numbers) are rejected, not silently truncated.
-
-## Preview and noninteractive use
-
-```sh
-radish edit --dry-run song.mp3
-radish edit --print song.mp3 song.flac > tags.yaml
-radish edit -A --print song.mp3 song.flac > all-tags.yaml
-# Edit tags.yaml, then:
-radish edit --apply tags.yaml --dry-run song.mp3 song.flac
-radish edit --apply tags.yaml song.mp3 song.flac
-```
-
-## Safety
-
-All edits are validated and staged in temporary copies beside the originals.
-Tags are read back to verify edited values before any original is replaced.
-Replacement is atomic **per file**, not a transaction across files. An error
-during replacement reports files already updated. Temporary copies are cleaned
-up; editor buffers are retained on errors, with their path printed to stderr.
-Invalid YAML, duplicate keys, unsupported fields, editor failures, and changes
-to input files detected while editing abort the operation.
-
-Symlinks resolve to their targets. Hard-linked files are rejected because
-atomic replacement would break their shared identity. Permissions and other
-metadata supported by `shutil.copy2` are retained; replacement files belong to
-the user running the command. MP3 ID3v2.3/v2.4 version is retained (older tags
-are upgraded to v2.4 by Mutagen). Keep backups of valuable audio files.
-Concurrent writers cannot be fully excluded without cooperation; do not edit
-the same files in another program during a session.
-
-## Tests
-
-```sh
-python3 -m unittest discover -s tests -v
-```
-
-Integration tests require `ffmpeg` to generate tiny audio fixtures locally.
