@@ -514,10 +514,69 @@ class IntegrationTests(unittest.TestCase):
             )
 
         self.assertEqual(result.exit_code, 0, result.output)
-        self.assertIn(f"{path}\n", result.output)
+        self.assertIn(f"{path}:\n  remove album tag\n", result.output)
         self.assertIn("Would clean 1 file(s).", result.output)
+        self.assertIn("Would merge 0 file(s).", result.output)
         continue_cmus.assert_not_called()
         self.assertEqual(tag_edit.load_audio(path).values["album"], ["Keep this album"])
+
+    def test_clean_dry_run_shows_artist_folder_merge_destination(self):
+        library = self.directory / "Music" / "Singletons"
+        source_folder = library / "Two_Steps_from_Hell"
+        source_folder.mkdir(parents=True)
+        source = source_folder / f"Victory{self.paths[0].suffix}"
+        shutil.copy2(self.paths[0], source)
+        audio = mutagen.File(source, easy=True)
+        audio["artist"] = ["Two Steps from Hell"]
+        audio.save()
+
+        result = CliRunner().invoke(
+            tag_edit.cli,
+            ["clean", "--dry-run", "--library", str(library)],
+        )
+
+        destination = library / "Two Steps from Hell" / source.name
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn(f"{source}:\n  move to: {destination}\n", result.output)
+        self.assertIn("Would merge 1 file(s).", result.output)
+        self.assertTrue(source.is_file())
+
+    def test_clean_merges_artist_folder_name_variants(self):
+        library = self.directory / "Music" / "Singletons"
+        upper_folder = library / "Two_Steps_From_Hell"
+        lower_folder = library / "Two_Steps_from_Hell"
+        upper_folder.mkdir(parents=True)
+        lower_folder.mkdir(parents=True)
+
+        upper_paths = []
+        for index, fixture in enumerate(self.paths[:3], start=1):
+            path = upper_folder / f"upper-{index}{fixture.suffix}"
+            shutil.copy2(fixture, path)
+            audio = mutagen.File(path, easy=True)
+            audio["artist"] = ["Two Steps From Hell"]
+            audio.save()
+            upper_paths.append(path)
+
+        lower_path = lower_folder / f"lower{self.paths[3].suffix}"
+        shutil.copy2(self.paths[3], lower_path)
+        audio = mutagen.File(lower_path, easy=True)
+        audio["artist"] = ["Two Steps from Hell"]
+        audio.save()
+
+        result = CliRunner().invoke(
+            tag_edit.cli, ["clean", "--library", str(library)],
+        )
+
+        canonical = library / "Two Steps From Hell"
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertFalse(upper_folder.exists())
+        self.assertFalse(lower_folder.exists())
+        self.assertTrue(canonical.is_dir())
+        self.assertTrue((canonical / lower_path.name).is_file())
+        self.assertTrue(all(
+            (canonical / path.name).is_file()
+            for path in upper_paths
+        ))
 
     def test_all_formats_edit_delete_preserve_art_and_audio(self):
         files = self.files()

@@ -273,6 +273,96 @@ def choose_import_destination(source, artist, library, reserved):
     )
 
 
+def normalize_artist_key(value):
+    return "".join(character for character in value.casefold() if character.isalnum())
+
+
+def canonical_artist_directories(files):
+    counts = {}
+    for audio in files:
+        artist = next(
+            (
+                value.strip()
+                for value in audio.values.get("artist", [])
+                if isinstance(value, str) and value.strip()
+            ),
+            None,
+        )
+        if artist is None:
+            continue
+        key = normalize_artist_key(artist)
+        if not key:
+            continue
+        counts.setdefault(key, {})
+        counts[key][artist] = counts[key].get(artist, 0) + 1
+
+    canonical = {}
+    for key, spellings in counts.items():
+        artist = sorted(
+            spellings,
+            key=lambda value: (-spellings[value], value.casefold(), value),
+        )[0]
+        canonical[key] = artist_directory_name(artist)
+    return canonical
+
+
+def singleton_root(library):
+    library = Path(library).expanduser().resolve()
+    if library.name.casefold() == "singletons":
+        return library
+    candidate = library / "Singletons"
+    if candidate.is_dir():
+        return candidate
+    return library
+
+
+def merge_singleton_artist_folders(files, library, dry_run=False):
+    library = Path(library).expanduser().resolve()
+    root = singleton_root(library)
+    canonical = canonical_artist_directories(files)
+    reserved = set()
+    operations = []
+
+    for audio in files:
+        artist = next(
+            (
+                value.strip()
+                for value in audio.values.get("artist", [])
+                if isinstance(value, str) and value.strip()
+            ),
+            None,
+        )
+        if artist is None:
+            continue
+        key = normalize_artist_key(artist)
+        destination_name = canonical.get(key)
+        if destination_name is None:
+            continue
+        try:
+            relative = audio.path.relative_to(root)
+        except ValueError:
+            continue
+        if len(relative.parts) < 2:
+            continue
+        if relative.parts[0] == destination_name:
+            continue
+        destination_directory = root / destination_name
+        destination = choose_unique_destination(
+            destination_directory,
+            audio.path.stem,
+            audio.path.suffix,
+            reserved,
+            source=audio.path,
+        )
+        operations.append((audio.path, destination))
+        if dry_run:
+            continue
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        move_without_overwrite(audio.path, destination)
+        cleanup_empty_library_folders(audio.path, root)
+    return operations
+
+
 def choose_edit_destination(audio, updates, library, reserved):
     if not any(key in updates for key in ("artist", "title", "album")):
         return audio.path
@@ -737,7 +827,9 @@ def clean_library(library, dry_run=False):
     ]
     if not dry_run:
         apply_changes(changes, library, relocate=False)
-    return [audio.path for audio, _ in changes]
+    moves = merge_singleton_artist_folders(files, library, dry_run=dry_run)
+    cleaned = [audio.path for audio, _ in changes]
+    return cleaned, moves
 
 
 @click.group()
@@ -809,15 +901,33 @@ def import_command(paths, library_path):
 )
 @click.option("--dry-run", is_flag=True, help="show affected files without changing tags")
 def clean(library_path, dry_run):
-    """Remove album tags from the music library."""
+    """Remove album tags and merge matching artist folders."""
     try:
-        paths = clean_library(library_path, dry_run=dry_run)
-        for path in paths:
-            click.echo(path)
-        if paths and not dry_run:
+        cleaned, moves = clean_library(library_path, dry_run=dry_run)
+        if dry_run:
+            for path in cleaned:
+                click.echo(f"{path}:")
+                click.echo("  remove album tag")
+            for source, destination in moves:
+                click.echo(f"{source}:")
+                click.echo(f"  move to: {destination}")
+        else:
+            for path in cleaned:
+                click.echo(path)
+            for source, destination in moves:
+                click.echo(f"Moved {source} -> {destination}")
+        affected = list(dict.fromkeys((
+            *(cleaned),
+            *(source for source, _ in moves),
+        )))
+        if affected and not dry_run:
             continue_cmus()
-        action = "Would clean" if dry_run else "Cleaned"
-        click.echo(f"{action} {len(paths)} file(s).")
+        if dry_run:
+            click.echo(f"Would clean {len(cleaned)} file(s).")
+            click.echo(f"Would merge {len(moves)} file(s).")
+        else:
+            click.echo(f"Cleaned {len(cleaned)} file(s).")
+            click.echo(f"Merged {len(moves)} file(s).")
     except (EditError, OSError, ValueError, mutagen.MutagenError) as error:
         raise click.ClickException(str(error)) from error
 

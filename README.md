@@ -40,7 +40,7 @@ under `~/Music/Singletons/<artist>/`.
 
 ## Clean
 
-Run `radish clean` to remove album tags from every supported audio file in `~/Music/Singletons`. Use `--dry-run` to preview the number of files that would be changed. Use `--library PATH` or `RADISH_LIBRARY` to select another library.
+Run `radish clean` to remove album tags from every supported audio file in `~/Music/Singletons` and merge artist-folder variants. Artist folders are grouped case-insensitively (including underscore variants), with the canonical artist spelling taken from the most common track tag. Use `--dry-run` to preview the number of files that would be changed. Use `--library PATH` or `RADISH_LIBRARY` to select another library.
 
 ## Vim
 
