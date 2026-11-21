@@ -289,7 +289,7 @@ class IntegrationTests(unittest.TestCase):
                 ["edit", "--apply", str(edited_yaml), "--library", str(library), str(source)],
             )
 
-        destination = library / "New Artist" / "New Title.m4a"
+        destination = library / "Albums" / "New Artist" / "Existing Album" / "New Title.m4a"
         self.assertEqual(result.exit_code, 0, result.output)
         continue_cmus.assert_called_once_with()
         self.assertTrue(destination.is_file())
@@ -318,11 +318,62 @@ class IntegrationTests(unittest.TestCase):
             ["edit", "--apply", str(edited_yaml), "--library", str(library), str(source)],
         )
 
-        destination = library / "Artist" / "New Album" / "Song.opus"
+        destination = library / "Albums" / "Artist" / "New Album" / "Song.opus"
         self.assertEqual(result.exit_code, 0, result.output)
         self.assertTrue(destination.is_file())
         self.assertFalse(source.exists())
         self.assertEqual(tag_edit.load_audio(destination).values["album"], ["New Album"])
+
+    def test_clearing_album_moves_file_to_singletons(self):
+        library = self.directory / "Music"
+        source = library / "Albums" / "Artist" / "Old Album" / "Song.opus"
+        source.parent.mkdir(parents=True)
+        shutil.copy2(self.paths[2], source)
+        audio = mutagen.File(source, easy=True)
+        audio["title"] = ["Song"]
+        audio["artist"] = ["Artist"]
+        audio["album"] = ["Old Album"]
+        audio.save()
+        document, = yaml.safe_load_all(tag_edit.render(tag_edit.read_files([str(source)])))
+        document["album"] = None
+        edited_yaml = self.directory / "singleton.yaml"
+        edited_yaml.write_text(yaml.safe_dump_all([document]), encoding="utf-8")
+
+        result = CliRunner().invoke(
+            tag_edit.cli,
+            ["edit", "--apply", str(edited_yaml), "--library", str(library), str(source)],
+        )
+
+        destination = library / "Singletons" / "Artist" / "Song.opus"
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertTrue(destination.is_file())
+        self.assertFalse(source.exists())
+        self.assertNotIn("album", tag_edit.load_audio(destination).values)
+
+    def test_edit_preserves_existing_album_location(self):
+        library = self.directory / "Music"
+        source = library / "Albums" / "Old Artist" / "Existing Album" / "Old Title.opus"
+        source.parent.mkdir(parents=True)
+        shutil.copy2(self.paths[2], source)
+        audio = mutagen.File(source, easy=True)
+        audio["title"] = ["Old Title"]
+        audio["artist"] = ["Old Artist"]
+        audio["album"] = ["Existing Album"]
+        audio.save()
+        document, = yaml.safe_load_all(tag_edit.render(tag_edit.read_files([str(source)])))
+        document["title"] = "New Title"
+        edited_yaml = self.directory / "existing-album.yaml"
+        edited_yaml.write_text(yaml.safe_dump_all([document]), encoding="utf-8")
+
+        result = CliRunner().invoke(
+            tag_edit.cli,
+            ["edit", "--apply", str(edited_yaml), "--library", str(library), str(source)],
+        )
+
+        destination = library / "Albums" / "Old Artist" / "Existing Album" / "New Title.opus"
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertTrue(destination.is_file())
+        self.assertFalse(source.exists())
 
     def test_edit_keeps_external_files_in_place(self):
         library = self.directory / "Music"
@@ -350,8 +401,11 @@ class IntegrationTests(unittest.TestCase):
         audio = mutagen.File(source, easy=True)
         audio["title"] = ["Old Title"]
         audio["artist"] = ["Artist"]
+        if "album" in audio:
+            del audio["album"]
         audio.save()
-        destination = source.parent / "New Title.opus"
+        destination = library / "Singletons" / "Artist" / "New Title.opus"
+        destination.parent.mkdir(parents=True)
         destination.write_bytes(b"keep existing")
         document, = yaml.safe_load_all(tag_edit.render(tag_edit.read_files([str(source)])))
         document["title"] = "New Title"
@@ -363,7 +417,7 @@ class IntegrationTests(unittest.TestCase):
             ["edit", "--apply", str(edited_yaml), "--library", str(library), str(source)],
         )
 
-        unique_destination = source.parent / "New Title_1.opus"
+        unique_destination = library / "Singletons" / "Artist" / "New Title_1.opus"
         self.assertEqual(result.exit_code, 0, result.output)
         self.assertEqual(destination.read_bytes(), b"keep existing")
         self.assertTrue(unique_destination.is_file())
@@ -377,6 +431,8 @@ class IntegrationTests(unittest.TestCase):
         audio = mutagen.File(source, easy=True)
         audio["title"] = ["Old Title"]
         audio["artist"] = ["Artist"]
+        if "album" in audio:
+            del audio["album"]
         audio.save()
         document, = yaml.safe_load_all(tag_edit.render(tag_edit.read_files([str(source)])))
         document["title"] = "New Title"
@@ -394,9 +450,14 @@ class IntegrationTests(unittest.TestCase):
 
         self.assertEqual(result.exit_code, 0, result.output)
         continue_cmus.assert_not_called()
-        self.assertIn(f"move to: {source.parent / 'New Title.opus'}", result.output)
+        self.assertIn(
+            f"move to: {library / 'Singletons' / 'Artist' / 'New Title.opus'}",
+            result.output,
+        )
         self.assertTrue(source.is_file())
-        self.assertFalse((source.parent / "New Title.opus").exists())
+        self.assertFalse(
+            (library / "Singletons" / "Artist" / "New Title.opus").exists()
+        )
 
     def test_edit_noop_does_not_call_cmus_continue(self):
         source = self.paths[0]

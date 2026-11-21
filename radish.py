@@ -290,12 +290,18 @@ def choose_edit_destination(audio, updates, library, reserved):
         raise EditError(f"{audio.path}: cannot organize edited file without an artist")
     title_values = updates.get("title", audio.values.get("title", []))
     title = next((value.strip() for value in title_values if value.strip()), audio.path.stem)
-    directory = library / artist_directory_name(artist)
-    if "album" in updates:
-        album_values = updates["album"]
-        album = next((value.strip() for value in album_values if value.strip()), None)
-        if album:
-            directory /= safe_path_component(album, "album")
+    album_values = updates.get("album", audio.values.get("album", []))
+    album = next((value.strip() for value in album_values if value.strip()), None)
+
+    if library.name.casefold() in ("albums", "singletons"):
+        root = library.parent
+    else:
+        root = library
+    category = "Albums" if album else "Singletons"
+
+    directory = root / category / artist_directory_name(artist)
+    if album:
+        directory /= safe_path_component(album, "album")
     return choose_unique_destination(
         directory, safe_path_component(title, "title"), audio.path.suffix,
         reserved, source=audio.path,
