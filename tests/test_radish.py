@@ -75,10 +75,22 @@ class ParsingTests(unittest.TestCase):
                 tag_edit.continue_cmus()
 
     def test_default_fields_include_missing_values(self):
-        document, = yaml.safe_load_all(tag_edit.render([self.audio]))
+        rendered = tag_edit.render([self.audio])
+        self.assertIn(f"# Path: {self.audio.path}\n", rendered)
+        document, = yaml.safe_load_all(rendered)
         self.assertEqual(list(document), ["title", "artist", "album"])
         self.assertEqual(document["title"], "Original")
         self.assertIsNone(document["album"])
+
+    def test_render_comments_show_one_path_per_document(self):
+        second = tag_edit.Audio(
+            Path("/music/second.flac"), "flac", {"title": ["Second"]}, (),
+        )
+        rendered = tag_edit.render([self.audio, second])
+        self.assertIn(f"# Path: {self.audio.path}\n", rendered)
+        self.assertIn(f"# Path: {second.path}\n", rendered)
+        documents = list(yaml.safe_load_all(rendered))
+        self.assertEqual(len(documents), 2)
 
     def test_documents_match_input_order(self):
         second = tag_edit.Audio(

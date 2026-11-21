@@ -550,10 +550,15 @@ def render(files, all_fields=False):
             values = audio.values.get(key, [])
             document[key] = values[0] if len(values) == 1 else values or None
         documents.append(document)
-    return HEADER + yaml.safe_dump_all(
-        documents, sort_keys=False, allow_unicode=True, explicit_start=True,
-        width=1000,
-    )
+    rendered = HEADER
+    for audio, document in zip(files, documents):
+        path = str(audio.path).replace("\r", "\\r").replace("\n", "\\n")
+        rendered += f"# Path: {path}\n"
+        rendered += yaml.safe_dump(
+            document, sort_keys=False, allow_unicode=True,
+            explicit_start=True, width=1000,
+        )
+    return rendered
 
 
 def supported(audio, key):

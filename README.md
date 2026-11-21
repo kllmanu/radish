@@ -51,3 +51,6 @@ nnoremap <leader>a :call ReplaceArtists()<CR>
 nnoremap <leader>A :call ClearAlbums()<CR>
 nnoremap <leader>t :call SanitizeTitles()<CR>
 ```
+
+The YAML edit buffer includes a `# Path: ...` comment for each file before its
+document so the corresponding file is visible while editing.
